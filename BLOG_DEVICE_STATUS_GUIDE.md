@@ -188,18 +188,20 @@ const data = await response.json();
 
 ### 位置
 
-`location` 可能为 `null`，或仅包含区级信息：
+`location` 可能为 `null`，或包含国家、省、市、区级信息：
 
 ```json
 {
+  "country": "中国",
+  "province": "江苏省",
+  "city": "无锡市",
   "district": "滨湖区",
-  "city": null,
   "captured_at": "2026-07-18T08:58:50Z",
   "accuracy_meters": 80
 }
 ```
 
-公开接口不会返回 `latitude` 和 `longitude`。博客只显示城市/区名、采集时间和可选精度，不要尝试从其他接口补回精确坐标。
+公开接口不会返回 `latitude` 和 `longitude`。博客可显示国家/省/市/区名、采集时间和可选精度，不要尝试从其他接口补回精确坐标。
 
 ## 7. 异常与缓存
 

@@ -89,8 +89,10 @@ type publicForegroundApp struct {
 }
 
 type publicLocation struct {
-	District       *string  `json:"district"`
+	Country        *string  `json:"country"`
+	Province       *string  `json:"province"`
 	City           *string  `json:"city"`
+	District       *string  `json:"district"`
 	CapturedAt     *string  `json:"captured_at"`
 	AccuracyMeters *float64 `json:"accuracy_meters"`
 }
@@ -600,15 +602,19 @@ func projectPublicPayload(payload []byte) (publicProjection, error) {
 	}
 	if value, ok := raw["location"]; ok && string(value) != "null" {
 		var location struct {
-			District       string   `json:"district"`
+			Country        string   `json:"country"`
+			Province       string   `json:"province"`
 			City           string   `json:"city"`
+			District       string   `json:"district"`
 			CapturedAt     string   `json:"captured_at"`
 			AccuracyMeters *float64 `json:"accuracy_meters"`
 		}
 		if json.Unmarshal(value, &location) == nil {
 			result.Location = &publicLocation{
-				District:       nonEmptyString(location.District),
+				Country:        nonEmptyString(location.Country),
+				Province:       nonEmptyString(location.Province),
 				City:           nonEmptyString(location.City),
+				District:       nonEmptyString(location.District),
 				CapturedAt:     nonEmptyString(location.CapturedAt),
 				AccuracyMeters: location.AccuracyMeters,
 			}

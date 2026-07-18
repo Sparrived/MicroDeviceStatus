@@ -1,6 +1,7 @@
 package com.microdevicestatus.mds;
 
 import android.app.ActivityManager;
+import android.app.AlarmManager;
 import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -23,6 +24,7 @@ import android.os.Debug;
 import android.os.Environment;
 import android.os.IBinder;
 import android.os.Process;
+import android.os.SystemClock;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
@@ -60,6 +62,7 @@ import java.util.concurrent.CountDownLatch;
 public final class HeartbeatService extends Service {
     public static final String ACTION_START = "com.microdevicestatus.mds.START";
     public static final String ACTION_SEND_NOW = "com.microdevicestatus.mds.SEND_NOW";
+    private static final String ACTION_RESTART = "com.microdevicestatus.mds.RESTART";
     public static final String PREFERENCES = "mds_mobile";
     public static final String KEY_ENDPOINT = "endpoint";
     public static final String KEY_TOKEN = "token";
@@ -71,6 +74,8 @@ public final class HeartbeatService extends Service {
     public static final int LOCATION_PERMISSION_REQUEST = 21;
     private static final String CHANNEL_ID = "mds_status";
     private static final int NOTIFICATION_ID = 7001;
+    private static final int RESTART_REQUEST_CODE = 7002;
+    private static final long RESTART_DELAY_MILLIS = 5000L;
     private static final String TAG = "MDS";
 
     private final AtomicBoolean cycleRunning = new AtomicBoolean();
@@ -87,6 +92,9 @@ public final class HeartbeatService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
+        if (ACTION_RESTART.equals(action)) {
+            cancelRestart();
+        }
         if (!ACTION_SEND_NOW.equals(action) && !getPreferences().getBoolean(KEY_MONITORING_ENABLED, false)) {
             stopSelf(startId);
             return START_NOT_STICKY;
@@ -105,8 +113,20 @@ public final class HeartbeatService extends Service {
         if (executor != null) {
             executor.shutdownNow();
         }
+        cancelRestart();
+        if (getPreferences().getBoolean(KEY_MONITORING_ENABLED, false)) {
+            scheduleRestart();
+        }
         stopForeground(true);
         super.onDestroy();
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        if (getPreferences().getBoolean(KEY_MONITORING_ENABLED, false)) {
+            scheduleRestart();
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
@@ -306,9 +326,16 @@ public final class HeartbeatService extends Service {
                 result.put("provider", location.getProvider());
             }
             result.put("captured_at", formatTime(location.getTime()));
-            String district = reverseGeocodeDistrict(location);
-            if (district != null) {
-                result.put("district", district);
+            Address address = reverseGeocodeAddress(location);
+            if (address != null) {
+                putNonEmpty(result, "country", address.getCountryName());
+                putNonEmpty(result, "province", address.getAdminArea());
+                putNonEmpty(result, "city", address.getLocality());
+                String district = address.getSubLocality();
+                if (district == null || district.trim().isEmpty()) {
+                    district = address.getSubAdminArea();
+                }
+                putNonEmpty(result, "district", district);
             }
         } catch (Exception error) {
             return null;
@@ -325,22 +352,29 @@ public final class HeartbeatService extends Service {
             return null;
         }
         long end = System.currentTimeMillis();
-        UsageEvents events = manager.queryEvents(end - TimeUnit.MINUTES.toMillis(10), end);
+        UsageEvents events = manager.queryEvents(end - TimeUnit.HOURS.toMillis(24), end);
         UsageEvents.Event event = new UsageEvents.Event();
         String packageName = null;
         long capturedAt = 0;
         while (events.hasNextEvent()) {
             events.getNextEvent(event);
             int eventType = event.getEventType();
-            if (eventType != UsageEvents.Event.ACTIVITY_RESUMED && eventType != UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                continue;
-            }
-            if (event.getTimeStamp() >= capturedAt && !isExcludedForegroundPackage(event.getPackageName())) {
+            if ((eventType == UsageEvents.Event.ACTIVITY_RESUMED
+                    || eventType == UsageEvents.Event.MOVE_TO_FOREGROUND)
+                    && event.getTimeStamp() >= capturedAt) {
                 packageName = event.getPackageName();
+                capturedAt = event.getTimeStamp();
+            } else if ((eventType == UsageEvents.Event.ACTIVITY_PAUSED
+                    || eventType == UsageEvents.Event.ACTIVITY_STOPPED
+                    || eventType == UsageEvents.Event.MOVE_TO_BACKGROUND)
+                    && event.getPackageName() != null
+                    && event.getPackageName().equals(packageName)
+                    && event.getTimeStamp() >= capturedAt) {
+                packageName = null;
                 capturedAt = event.getTimeStamp();
             }
         }
-        if (packageName == null) {
+        if (packageName == null || isExcludedForegroundPackage(packageName)) {
             return null;
         }
         try {
@@ -364,13 +398,14 @@ public final class HeartbeatService extends Service {
         if (packageName == null || packageName.equals(getPackageName())) {
             return true;
         }
-        Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
-        android.content.pm.ResolveInfo launcher = getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
-        return launcher != null && launcher.activityInfo != null && packageName.equals(launcher.activityInfo.packageName);
+        if (packageName.equals("com.android.systemui") || packageName.startsWith("com.android.systemui:")) {
+            return true;
+        }
+        return false;
     }
 
     @SuppressWarnings("deprecation")
-    private String reverseGeocodeDistrict(Location location) {
+    private Address reverseGeocodeAddress(Location location) {
         if (!Geocoder.isPresent()) {
             return null;
         }
@@ -379,13 +414,15 @@ public final class HeartbeatService extends Service {
             if (addresses == null || addresses.isEmpty()) {
                 return null;
             }
-            String district = addresses.get(0).getSubLocality();
-            if (district == null || district.trim().isEmpty()) {
-                district = addresses.get(0).getSubAdminArea();
-            }
-            return district == null || district.trim().isEmpty() ? null : district.trim();
+            return addresses.get(0);
         } catch (IOException | IllegalArgumentException ignored) {
             return null;
+        }
+    }
+
+    private void putNonEmpty(JSONObject target, String key, String value) throws org.json.JSONException {
+        if (value != null && !value.trim().isEmpty()) {
+            target.put(key, value.trim());
         }
     }
 
@@ -533,6 +570,36 @@ public final class HeartbeatService extends Service {
 
     private SharedPreferences getPreferences() {
         return getSharedPreferences(PREFERENCES, MODE_PRIVATE);
+    }
+
+    private void scheduleRestart() {
+        AlarmManager alarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
+        if (alarmManager == null || !getPreferences().getBoolean(KEY_MONITORING_ENABLED, false)) {
+            return;
+        }
+        PendingIntent restart = restartPendingIntent();
+        long triggerAt = SystemClock.elapsedRealtime() + RESTART_DELAY_MILLIS;
+        if (Build.VERSION.SDK_INT >= 23) {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, restart);
+        } else {
+            alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, restart);
+        }
+    }
+
+    private void cancelRestart() {
+        AlarmManager alarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
+        if (alarmManager != null) {
+            alarmManager.cancel(restartPendingIntent());
+        }
+    }
+
+    private PendingIntent restartPendingIntent() {
+        Intent intent = new Intent(this, HeartbeatService.class).setAction(ACTION_RESTART);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
+        if (Build.VERSION.SDK_INT >= 26) {
+            return PendingIntent.getForegroundService(this, RESTART_REQUEST_CODE, intent, flags);
+        }
+        return PendingIntent.getService(this, RESTART_REQUEST_CODE, intent, flags);
     }
 
     private void setStatus(String status) {

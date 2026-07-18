@@ -138,10 +138,8 @@ jobs:
             -Pmds.versionName="$VERSION" \
             -Pmds.versionCode="$version_code"
           mkdir -p ../dist/release
-          cp app/build/outputs/apk/release/app-release-unsigned.apk \
-            "../dist/release/mds-mobile-android-${VERSION}.apk" \
-            || cp app/build/outputs/apk/release/*.apk \
-              "../dist/release/mds-mobile-android-${VERSION}.apk"
+          cp app/build/outputs/apk/release/*.apk \
+            "../dist/release/mds-mobile-android-${VERSION}.apk"
           (
             cd ../dist/release
             sha256sum "mds-mobile-android-${VERSION}.apk" > "mds-mobile-android-${VERSION}.apk.sha256"
@@ -328,7 +326,7 @@ jobs:
           - Windows / Linux / macOS install archives: \`mds-desktop-*\`
 
           ### Android
-          - APK: \`mds-mobile-android-${VERSION}.apk\` (unsigned release build; sign before store distribution)
+          - APK: \`mds-mobile-android-${VERSION}.apk\` (debug-signed for direct installation; replace the signing config before store distribution)
 
           ### Checksums
           See \`SHA256SUMS.txt\`.

@@ -29,8 +29,9 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            // Unsigned release APK is intentional for open-source install packages.
-            // Sign with your own keystore before Play Store distribution.
+            // Keep local and CI release artifacts installable. Replace this with
+            // a stable production signing config before Play Store distribution.
+            signingConfig signingConfigs.debug
         }
         debug {
             minifyEnabled false

@@ -133,6 +133,14 @@
             android:text="设置前台应用访问权限"
             android:textAllCaps="false" />
 
+        <Button
+            android:id="@+id/battery_optimization_button"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:text="设置后台运行不受限制"
+            android:textAllCaps="false" />
+
         <TextView
             android:id="@+id/status_text"
             android:layout_width="match_parent"

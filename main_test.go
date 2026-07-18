@@ -99,7 +99,7 @@ func TestPublicSnapshotAuthAndProjection(t *testing.T) {
 	_, err = db.Exec(`
 		INSERT INTO reports (device_id, reported_at, received_at, payload)
 		VALUES (?, ?, ?, ?)
-	`, "public", now.Add(-11*time.Second).Format(time.RFC3339Nano), now.Add(-10*time.Second).Format(time.RFC3339Nano), []byte(`{"reported_at":"2026-07-18T00:00:00Z","hostname":"secret-host","metrics":{"cpu_percent":0,"battery_percent":76,"network_connected":true,"memory_percent":43.2,"disk_used_percent":68.1},"foreground_app":{"name":"微信","package_name":"com.tencent.mm","captured_at":"2026-07-18T00:00:00Z","title":"私人文档.docx - 编辑器"},"location":{"district":"滨湖区","latitude":31.49,"longitude":120.31,"accuracy_meters":80,"captured_at":"2026-07-18T00:00:00Z"},"processes":[{"name":"secret.exe","pid":123}]}`))
+	`, "public", now.Add(-11*time.Second).Format(time.RFC3339Nano), now.Add(-10*time.Second).Format(time.RFC3339Nano), []byte(`{"reported_at":"2026-07-18T00:00:00Z","hostname":"secret-host","metrics":{"cpu_percent":0,"battery_percent":76,"network_connected":true,"memory_percent":43.2,"disk_used_percent":68.1},"foreground_app":{"name":"微信","package_name":"com.tencent.mm","captured_at":"2026-07-18T00:00:00Z","title":"私人文档.docx - 编辑器"},"location":{"country":"中国","province":"江苏省","city":"无锡市","district":"滨湖区","latitude":31.49,"longitude":120.31,"accuracy_meters":80,"captured_at":"2026-07-18T00:00:00Z"},"processes":[{"name":"secret.exe","pid":123}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,6 +158,9 @@ func TestPublicSnapshotAuthAndProjection(t *testing.T) {
 	}
 	if public.Location == nil || public.Location.District == nil || *public.Location.District != "滨湖区" {
 		t.Fatalf("location was not projected: %+v", public.Location)
+	}
+	if public.Location.Country == nil || *public.Location.Country != "中国" || public.Location.Province == nil || *public.Location.Province != "江苏省" || public.Location.City == nil || *public.Location.City != "无锡市" {
+		t.Fatalf("location hierarchy was not projected: %+v", public.Location)
 	}
 	for _, forbidden := range []string{"latitude", "longitude", "processes", "secret.exe", "私人文档", "secret-host", "public-device"} {
 		if bytes.Contains(resp.Body.Bytes(), []byte(forbidden)) {

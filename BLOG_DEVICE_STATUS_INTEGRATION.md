@@ -211,6 +211,9 @@ Authorization: Bearer <MDS_PUBLIC_STATUS_TOKEN>
         "captured_at": "2026-07-18T08:59:20Z"
       },
       "location": {
+        "country": "中国",
+        "province": "江苏省",
+        "city": "无锡市",
         "district": "滨湖区",
         "captured_at": "2026-07-18T08:58:50Z",
         "accuracy_meters": 80
@@ -443,17 +446,20 @@ Android 12 及以上、以及部分国产系统可能限制后台启动和自启
 但博客需求是“精确到区”，因此不能直接把上述原始字段放进公开快照。推荐分两层保存：
 
 - 管理接口和原始报告：可以保存原始坐标，供本人查看。
-- 公开快照：只返回 `district`、城市和采集时间，不返回经纬度。
+- 公开快照：只返回国家、省、市、区和采集时间，不返回经纬度。
 
 区名获取有两种方案：
 
 ### 方案 A：Android 端反向地理编码
 
-Android 客户端根据坐标生成 `district` 字段后再上报：
+Android 客户端根据坐标生成国家、省、市、区字段后再上报：
 
 ```json
 {
   "location": {
+    "country": "中国",
+    "province": "江苏省",
+    "city": "无锡市",
     "district": "滨湖区",
     "accuracy_meters": 80,
     "captured_at": "2026-07-18T08:58:50Z"

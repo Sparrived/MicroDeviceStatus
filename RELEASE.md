@@ -12,7 +12,7 @@ clients**, and **Android client**, plus a **Docker image** on GHCR.
 | `mds-server-darwin-*-*.tar.gz` | Server binary + `INSTALL.txt` |
 | `mds-server-docker-*.tar.gz` | Compose pull-only bundle + `.env.example` + install notes |
 | `mds-desktop-*-*.zip` / `.tar.gz` | Desktop agent + config example + install notes |
-| `mds-mobile-android-*.apk` | Unsigned release APK |
+| `mds-mobile-android-*.apk` | Installable release APK signed with the default debug key |
 | `SHA256SUMS.txt` | Checksums for archives/APK |
 
 Docker image (GHCR):
@@ -60,8 +60,12 @@ Android APK is only produced in CI (or locally with Android SDK):
 
 ```bash
 cd mds_mobile
-./gradlew assembleRelease -Pmds.versionName=0.0.0-local -Pmds.versionCode=1
+./gradlew assembleRelease --project-prop=mds.versionName=0.0.0-local --project-prop=mds.versionCode=1
 ```
+
+The release APK is signed with the default debug key so it can be installed
+directly for self-hosted use. Configure a stable production keystore before
+publishing to an app store or distributing upgradeable production releases.
 
 ## First-time GHCR note
 

@@ -197,8 +197,8 @@ the same device token returned by `POST /api/v1/devices`. See
 
 Mobile location reporting is opt-in. After enabling it and granting Android
 location permission, heartbeats include raw latitude/longitude in the private
-report plus a best-effort district name. The public snapshot only projects the
-district, accuracy, and capture time.
+report plus best-effort country, province, city, and district names. The public
+snapshot only projects those administrative names, accuracy, and capture time.
 
 ## Releases
 

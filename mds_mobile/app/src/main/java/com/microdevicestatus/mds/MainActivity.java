@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.net.Uri;
 import android.widget.Button;
@@ -56,6 +57,8 @@ public final class MainActivity extends Activity {
         sendNowButton.setOnClickListener(view -> sendNow());
         Button usageAccessButton = findViewById(R.id.usage_access_button);
         usageAccessButton.setOnClickListener(view -> openUsageAccessSettings());
+        Button batteryOptimizationButton = findViewById(R.id.battery_optimization_button);
+        batteryOptimizationButton.setOnClickListener(view -> openBatteryOptimizationSettings());
 
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
@@ -143,11 +146,11 @@ public final class MainActivity extends Activity {
     }
 
     private void stopMonitoring() {
-        stopService(new Intent(this, HeartbeatService.class));
         getSharedPreferences(HeartbeatService.PREFERENCES, MODE_PRIVATE).edit()
                 .putString(HeartbeatService.KEY_STATUS, "已停止")
                 .putBoolean(HeartbeatService.KEY_MONITORING_ENABLED, false)
                 .apply();
+        stopService(new Intent(this, HeartbeatService.class));
         refreshStatus();
     }
 
@@ -180,6 +183,26 @@ public final class MainActivity extends Activity {
 
     private void openUsageAccessSettings() {
         startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:" + getPackageName())));
+    }
+
+    private void openBatteryOptimizationSettings() {
+        if (Build.VERSION.SDK_INT < 23) {
+            return;
+        }
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager != null && powerManager.isIgnoringBatteryOptimizations(getPackageName())) {
+            getSharedPreferences(HeartbeatService.PREFERENCES, MODE_PRIVATE).edit()
+                    .putString(HeartbeatService.KEY_STATUS, "后台运行已设为不受限制")
+                    .apply();
+            refreshStatus();
+            return;
+        }
+        try {
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception ignored) {
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        }
     }
 
     private boolean hasUsageAccess() {

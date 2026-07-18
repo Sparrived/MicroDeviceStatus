@@ -158,8 +158,9 @@ Returns `{"status":"ok"}` when the database is reachable.
 The snapshot requires `Authorization: Bearer <MDS_PUBLIC_STATUS_TOKEN>` and
 only includes `MDS_PUBLIC_DEVICE_IDS`. It returns server-derived
 `never_seen`, `online`, `stale`, or `offline` status and a fixed projection of
-metrics, foreground app, and district-level location. It never returns device
-tokens, process lists, window titles, hostnames, or raw latitude/longitude.
+metrics, foreground app, and country/province/city/district-level location. It
+never returns device tokens, process lists, window titles, hostnames, or raw
+latitude/longitude.
 The endpoint sends `Cache-Control: no-store`; a blog server may cache its own
 proxy response.
 
