@@ -259,10 +259,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download artifacts
+      - name: Download server/desktop packages
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: server-desktop-packages
+          path: artifacts/server-desktop-packages
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/android-apk
+
+      - name: Download Docker notes
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-notes
+          path: artifacts/docker-notes
 
       - name: Assemble release directory
         shell: bash
@@ -272,7 +285,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          # flatten artifacts
+          # flatten only the intentional package artifacts (not docker buildx cache dumps)
           find artifacts -type f -print
           find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name 'SHA256SUMS.txt' -o -name 'release-manifest.json' -o -name 'DOCKER.txt' -o -name '*.sha256' \) \
             -exec cp -v {} release/ \;
@@ -335,6 +348,13 @@ jobs:
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.version == '' }}
           generate_release_notes: true
           files: |
-            release/*
+            release/*.zip
+            release/*.tar.gz
+            release/*.apk
+            release/SHA256SUMS.txt
+            release/release-manifest.json
+            release/DOCKER.txt
+            release/*.sha256
+            release/RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
