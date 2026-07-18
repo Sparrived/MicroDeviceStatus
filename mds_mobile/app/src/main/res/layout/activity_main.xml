@@ -102,7 +102,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginStart="12dp"
-            android:text="默认关闭。开启后需要授予定位权限，心跳会包含经纬度和精度。"
+            android:text="默认关闭。开启后需要授予定位权限，心跳只包含国家、省、市、区。"
             android:textColor="@color/mds_muted"
             android:textSize="12sp" />
 

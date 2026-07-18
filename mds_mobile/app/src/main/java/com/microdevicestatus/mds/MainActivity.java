@@ -49,6 +49,11 @@ public final class MainActivity extends Activity {
         usageAccessText = findViewById(R.id.usage_access_text);
         loadPreferences();
 
+        if (getSharedPreferences(HeartbeatService.PREFERENCES, MODE_PRIVATE)
+                .getBoolean(HeartbeatService.KEY_MONITORING_ENABLED, false)) {
+            dispatchService(HeartbeatService.ACTION_START);
+        }
+
         Button startButton = findViewById(R.id.start_button);
         startButton.setOnClickListener(view -> startMonitoring());
         Button stopButton = findViewById(R.id.stop_button);

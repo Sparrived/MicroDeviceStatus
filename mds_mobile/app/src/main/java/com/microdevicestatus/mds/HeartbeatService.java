@@ -9,22 +9,30 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.app.usage.UsageEvents;
+import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.hardware.display.DisplayManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Debug;
 import android.os.Environment;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.os.Process;
 import android.os.SystemClock;
+import android.os.health.HealthStats;
+import android.os.health.SystemHealthManager;
+import android.os.health.UidHealthStats;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
@@ -32,6 +40,7 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.StatFs;
 import android.util.Log;
+import android.view.Display;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -82,6 +91,9 @@ public final class HeartbeatService extends Service {
     private ScheduledExecutorService executor;
     private long previousCpuTotal;
     private long previousCpuIdle;
+    private long previousAppCpuTime;
+    private long previousAppCpuWallTime;
+    private String cpuScope = "unavailable";
 
     @Override
     public void onCreate() {
@@ -214,6 +226,7 @@ public final class HeartbeatService extends Service {
         double cpu = cpuPercent();
         if (cpu >= 0) {
             metrics.put("cpu_percent", cpu);
+            metrics.put("cpu_scope", cpuScope);
         }
         root.put("metrics", metrics);
 
@@ -314,36 +327,30 @@ public final class HeartbeatService extends Service {
         if (location == null) {
             return null;
         }
-        JSONObject result = new JSONObject();
         try {
-            result.put("latitude", location.getLatitude());
-            result.put("longitude", location.getLongitude());
-            result.put("accuracy_meters", location.getAccuracy());
-            if (location.hasAltitude()) {
-                result.put("altitude_meters", location.getAltitude());
-            }
-            if (location.getProvider() != null) {
-                result.put("provider", location.getProvider());
-            }
-            result.put("captured_at", formatTime(location.getTime()));
             Address address = reverseGeocodeAddress(location);
-            if (address != null) {
-                putNonEmpty(result, "country", address.getCountryName());
-                putNonEmpty(result, "province", address.getAdminArea());
-                putNonEmpty(result, "city", address.getLocality());
-                String district = address.getSubLocality();
-                if (district == null || district.trim().isEmpty()) {
-                    district = address.getSubAdminArea();
-                }
-                putNonEmpty(result, "district", district);
+            if (address == null) {
+                return null;
             }
+            JSONObject result = new JSONObject();
+            putNonEmpty(result, "country", address.getCountryName());
+            putNonEmpty(result, "province", address.getAdminArea());
+            putNonEmpty(result, "city", address.getLocality());
+            String district = address.getSubLocality();
+            if (district == null || district.trim().isEmpty()) {
+                district = address.getSubAdminArea();
+            }
+            putNonEmpty(result, "district", district);
+            return result.length() == 0 ? null : result;
         } catch (Exception error) {
             return null;
         }
-        return result;
     }
 
     private JSONObject currentForegroundApp() {
+        if (!isScreenInteractive()) {
+            return screenOffForegroundApp();
+        }
         if (!hasUsageAccess()) {
             return null;
         }
@@ -364,27 +371,89 @@ public final class HeartbeatService extends Service {
                     && event.getTimeStamp() >= capturedAt) {
                 packageName = event.getPackageName();
                 capturedAt = event.getTimeStamp();
-            } else if ((eventType == UsageEvents.Event.ACTIVITY_PAUSED
-                    || eventType == UsageEvents.Event.ACTIVITY_STOPPED
-                    || eventType == UsageEvents.Event.MOVE_TO_BACKGROUND)
-                    && event.getPackageName() != null
-                    && event.getPackageName().equals(packageName)
-                    && event.getTimeStamp() >= capturedAt) {
-                packageName = null;
-                capturedAt = event.getTimeStamp();
             }
         }
         if (packageName == null || isExcludedForegroundPackage(packageName)) {
-            return null;
+            UsageStats fallback = latestUserApp(manager, end);
+            if (fallback == null) {
+                return null;
+            }
+            packageName = fallback.getPackageName();
+            capturedAt = fallback.getLastTimeUsed();
         }
         try {
-            ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
+            String appName = applicationName(packageName);
             JSONObject result = new JSONObject();
-            result.put("name", getPackageManager().getApplicationLabel(info).toString());
+            result.put("name", appName);
             result.put("package_name", packageName);
             result.put("captured_at", formatTime(capturedAt));
             return result;
-        } catch (PackageManager.NameNotFoundException | org.json.JSONException ignored) {
+        } catch (org.json.JSONException ignored) {
+            return null;
+        }
+    }
+
+    private String applicationName(String packageName) {
+        try {
+            ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
+            CharSequence label = getPackageManager().getApplicationLabel(info);
+            if (label != null && label.length() > 0) {
+                return label.toString();
+            }
+        } catch (PackageManager.NameNotFoundException | SecurityException ignored) {
+        }
+
+        LauncherApps launcherApps = (LauncherApps) getSystemService(LAUNCHER_APPS_SERVICE);
+        if (launcherApps != null) {
+            try {
+                List<LauncherActivityInfo> activities = launcherApps.getActivityList(
+                        packageName, Process.myUserHandle());
+                if (!activities.isEmpty()) {
+                    CharSequence label = activities.get(0).getLabel();
+                    if (label != null && label.length() > 0) {
+                        return label.toString();
+                    }
+                }
+            } catch (SecurityException ignored) {
+            }
+        }
+        return packageName;
+    }
+
+    private UsageStats latestUserApp(UsageStatsManager manager, long end) {
+        List<UsageStats> stats = manager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                end - TimeUnit.HOURS.toMillis(24),
+                end);
+        UsageStats latest = null;
+        for (UsageStats candidate : stats) {
+            if (candidate == null || isExcludedForegroundPackage(candidate.getPackageName())) {
+                continue;
+            }
+            if (latest == null || candidate.getLastTimeUsed() > latest.getLastTimeUsed()) {
+                latest = candidate;
+            }
+        }
+        return latest;
+    }
+
+    private boolean isScreenInteractive() {
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager != null && !powerManager.isInteractive()) {
+            return false;
+        }
+        DisplayManager displayManager = (DisplayManager) getSystemService(DISPLAY_SERVICE);
+        Display display = displayManager == null ? null : displayManager.getDisplay(Display.DEFAULT_DISPLAY);
+        return display == null || display.getState() == Display.STATE_ON;
+    }
+
+    private JSONObject screenOffForegroundApp() {
+        try {
+            return new JSONObject()
+                    .put("name", "息屏")
+                    .put("package_name", "screen_off")
+                    .put("captured_at", now());
+        } catch (org.json.JSONException ignored) {
             return null;
         }
     }
@@ -525,12 +594,13 @@ public final class HeartbeatService extends Service {
             if (fields.length < 5 || !"cpu".equals(fields[0])) {
                 return -1;
             }
+            cpuScope = "device";
             long total = 0;
             long idle = 0;
             for (int index = 1; index < fields.length; index++) {
                 long value = Long.parseLong(fields[index]);
                 total += value;
-                if (index <= 2) {
+                if (index == 4 || index == 5) {
                     idle += value;
                 }
             }
@@ -544,7 +614,65 @@ public final class HeartbeatService extends Service {
             previousCpuTotal = total;
             previousCpuIdle = idle;
             return totalDelta <= 0 ? 0 : Math.max(0, Math.min(100, (totalDelta - idleDelta) * 100.0 / totalDelta));
-        } catch (Exception error) {
+        } catch (Exception ignored) {
+            double load = cpuLoadPercent();
+            if (load >= 0) {
+                cpuScope = "device_load";
+                return load;
+            }
+            double app = appCpuPercent();
+            if (app >= 0) {
+                cpuScope = "app_uid";
+                return app;
+            }
+            cpuScope = "unavailable";
+            return -1;
+        }
+    }
+
+    private double cpuLoadPercent() {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                new FileInputStream("/proc/loadavg"), StandardCharsets.UTF_8))) {
+            String[] fields = reader.readLine().trim().split("\\s+");
+            if (fields.length == 0) {
+                return -1;
+            }
+            double load = Double.parseDouble(fields[0]);
+            int processors = Math.max(1, Runtime.getRuntime().availableProcessors());
+            return Math.max(0, Math.min(100, load * 100.0 / processors));
+        } catch (Exception ignored) {
+            return -1;
+        }
+    }
+
+    private double appCpuPercent() {
+        try {
+            SystemHealthManager manager = getSystemService(SystemHealthManager.class);
+            if (manager == null) {
+                return -1;
+            }
+            HealthStats stats = manager.takeMyUidSnapshot();
+            if (stats == null
+                    || !stats.hasMeasurement(UidHealthStats.MEASUREMENT_USER_CPU_TIME_MS)
+                    || !stats.hasMeasurement(UidHealthStats.MEASUREMENT_SYSTEM_CPU_TIME_MS)) {
+                return -1;
+            }
+            long cpuTime = stats.getMeasurement(UidHealthStats.MEASUREMENT_USER_CPU_TIME_MS)
+                    + stats.getMeasurement(UidHealthStats.MEASUREMENT_SYSTEM_CPU_TIME_MS);
+            long wallTime = SystemClock.elapsedRealtime();
+            if (previousAppCpuTime == 0 || previousAppCpuWallTime == 0) {
+                previousAppCpuTime = cpuTime;
+                previousAppCpuWallTime = wallTime;
+                return 0;
+            }
+            long cpuDelta = cpuTime - previousAppCpuTime;
+            long wallDelta = wallTime - previousAppCpuWallTime;
+            previousAppCpuTime = cpuTime;
+            previousAppCpuWallTime = wallTime;
+            int processors = Math.max(1, Runtime.getRuntime().availableProcessors());
+            return wallDelta <= 0 ? 0 : Math.max(0, Math.min(100,
+                    cpuDelta * 100.0 / wallDelta / processors));
+        } catch (Exception ignored) {
             return -1;
         }
     }

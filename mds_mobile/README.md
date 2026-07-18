@@ -23,9 +23,14 @@ real devices and production deployments.
 
 Location reporting is opt-in and disabled by default. Enable `上报当前位置`
 in the app and grant Android location permission to add a `location` object to
-heartbeats. It contains latitude, longitude, accuracy, provider, capture time,
-and best-effort country, province, city, and district names. The MDS public
-snapshot never exposes the raw coordinates.
+heartbeats. It contains only best-effort country, province, city, and district
+names. No latitude, longitude, accuracy, provider, or capture time is sent.
+
+CPU reporting uses the device CPU counters when Android allows access to
+`/proc/stat`. On newer Android versions that restrict those counters, it falls
+back to a normalized device load or the MDS app UID CPU time and adds
+`metrics.cpu_scope` as `device_load` or `app_uid` so the value is not mistaken
+for an exact whole-device CPU percentage.
 
 Enable `开机自动恢复上报` to let the `BOOT_COMPLETED` receiver restart the
 foreground service after a reboot. Android still requires the user to allow
@@ -39,3 +44,5 @@ The app can optionally request Usage Access in system settings. With that
 permission it reports the most recent non-MDS foreground application as
 `name`, `package_name`, and `captured_at`. Without it, every heartbeat sends
 `foreground_app: null` and does not misidentify MDS itself as the active app.
+When the display is off, `foreground_app` is reported as `息屏` with the
+synthetic package name `screen_off`.
