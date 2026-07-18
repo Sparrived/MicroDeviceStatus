@@ -1,0 +1,17 @@
+MicroDeviceStatus Server
+
+1. Set secrets in the environment or a .env file:
+   MDS_ADMIN_TOKEN, MDS_ADMIN_USERNAME, MDS_ADMIN_PASSWORD
+   Optional: MDS_ADDR, MDS_DB_PATH, MDS_COOKIE_SECURE
+
+2. Run the binary from this directory (or any working directory).
+   The process creates the SQLite database path automatically.
+
+3. Open http://127.0.0.1:8080/ and log in with MDS_ADMIN_USERNAME / MDS_ADMIN_PASSWORD.
+
+4. Put HTTPS (nginx, Caddy, IIS, cloud LB) in front for real devices.
+   Set MDS_COOKIE_SECURE=1 when browsers use HTTPS.
+
+5. Run only one process. Sessions are in-memory.
+
+See https://github.com/Sparrived/MicroDeviceStatus/blob/main/DEPLOY.md

@@ -1,0 +1,11 @@
+MicroDeviceStatus Desktop Client
+
+1. Copy config.example.json to mds-desktop.json
+2. Set "endpoint" to your server URL and "token" to the device token
+   from POST /api/v1/devices (shown once at provisioning).
+3. Run the binary next to the config file, or pass flags:
+   -endpoint https://status.example.com -token <device-token>
+4. Optional env: MDS_ENDPOINT, MDS_DEVICE_TOKEN
+5. Failed heartbeats are queued in mds-desktop.queue.jsonl and retried.
+
+See mds_desktop/README.md in the repository.

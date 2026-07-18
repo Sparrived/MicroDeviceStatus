@@ -2,7 +2,7 @@
 
 This guide covers production deployment of the **server only**. The service is a
 single static Go binary plus one SQLite database file. It runs the same way on
-Windows and Linux.
+Windows and Linux, and can also be packaged with Docker (see section 3).
 
 For architecture, API contract, and authentication details, read
 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). For local development, see
@@ -74,7 +74,201 @@ $env:CGO_ENABLED = "0"
 go build -trimpath -ldflags="-s -w" -o microdevicestatus.exe .
 ```
 
-## 3. Required Configuration
+
+## 3. Docker Deployment
+
+Recommended when you want a single-host install without installing Go on the
+server. The image is multi-stage: build with official Go, run on Alpine as user
+`mds` (uid 1000) with SQLite on a volume.
+
+**Rules (same as bare-metal):**
+
+- Run **exactly one** container. Sessions are in-memory; do not scale replicas.
+- Put **HTTPS** in front (Caddy / nginx / Traefik / cloud LB). The container only
+  speaks plain HTTP.
+- Keep the SQLite volume on **local disk**.
+- Pass secrets via env / Compose `.env` — never bake them into the image.
+
+### 3.1 Files in this repo
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Multi-stage build + runtime image |
+| `docker-compose.yml` | One-service Compose stack + named volume |
+| `.env.example` | Template for required secrets |
+| `.dockerignore` | Keeps clients, dist, and secrets out of the build context |
+| `scripts/docker-entrypoint.sh` | Fixes volume ownership, then drops root |
+
+### 3.2 Quick start (Docker Compose)
+
+Requirements: Docker Engine + Compose v2 (or Docker Desktop).
+
+```bash
+# From the repository root
+cp .env.example .env
+# Edit .env — set strong MDS_ADMIN_TOKEN and MDS_ADMIN_PASSWORD
+
+docker compose up -d --build
+curl -sS http://127.0.0.1:8080/healthz
+# expect: {"status":"ok"}
+```
+
+Dashboard: `http://127.0.0.1:8080/` with the credentials from `.env`.
+
+Compose binds the published port to **host loopback** (`127.0.0.1:8080:8080`)
+so the app is not open to the LAN by default. Change the left side of the port
+mapping only if you intentionally expose it (still prefer a reverse proxy).
+
+Useful commands:
+
+```bash
+docker compose logs -f mds
+docker compose ps
+docker compose restart mds
+docker compose down          # keeps the named volume
+docker compose down -v       # deletes the SQLite volume — data loss
+```
+
+### 3.3 Build and run without Compose
+
+```bash
+docker build -t microdevicestatus:local .
+
+docker run -d --name microdevicestatus --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -e MDS_ADMIN_TOKEN="$(openssl rand -hex 32)" \
+  -e MDS_ADMIN_USERNAME=admin \
+  -e MDS_ADMIN_PASSWORD="$(openssl rand -base64 24)" \
+  -e MDS_ADDR=:8080 \
+  -e MDS_DB_PATH=/data/micro-device-status.db \
+  -e MDS_COOKIE_SECURE=0 \
+  -v mds-data:/data \
+  microdevicestatus:local
+```
+
+Windows PowerShell equivalent (generate secrets yourself and paste):
+
+```powershell
+docker build -t microdevicestatus:local .
+
+docker run -d --name microdevicestatus --restart unless-stopped `
+  -p 127.0.0.1:8080:8080 `
+  -e MDS_ADMIN_TOKEN="replace-with-a-long-random-token" `
+  -e MDS_ADMIN_USERNAME=admin `
+  -e MDS_ADMIN_PASSWORD="replace-with-a-long-password" `
+  -e MDS_ADDR=:8080 `
+  -e MDS_DB_PATH=/data/micro-device-status.db `
+  -e MDS_COOKIE_SECURE=0 `
+  -v mds-data:/data `
+  microdevicestatus:local
+```
+
+### 3.4 Environment variables (container)
+
+Same variables as bare-metal. Inside the image defaults are:
+
+| Variable | Container default |
+|----------|-------------------|
+| `MDS_ADDR` | `:8080` |
+| `MDS_DB_PATH` | `/data/micro-device-status.db` |
+| `MDS_ADMIN_TOKEN` | **required** |
+| `MDS_ADMIN_USERNAME` | **required** (Compose default `admin`) |
+| `MDS_ADMIN_PASSWORD` | **required** |
+| `MDS_COOKIE_SECURE` | set to `1` behind HTTPS |
+
+### 3.5 Reverse proxy in front of Docker
+
+Point the proxy at the published host port (or the container network alias if
+the proxy is another Compose service).
+
+Caddy on the host:
+
+```caddy
+status.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+When HTTPS is enabled, set in `.env` / run flags:
+
+```bash
+MDS_COOKIE_SECURE=1
+```
+
+Then recreate the container so it picks up the new value:
+
+```bash
+docker compose up -d
+```
+
+Optional: run Caddy (or Traefik) as a sibling Compose service on the same
+Docker network and proxy to `http://mds:8080` instead of publishing `8080` on
+the host. Keep a **single** `mds` replica.
+
+### 3.6 Data, backup, and upgrade
+
+SQLite path inside the container: `/data/micro-device-status.db` (volume
+`mds-data` in Compose).
+
+Backup while the container is stopped (simplest consistent copy):
+
+```bash
+docker compose stop mds
+docker run --rm -v mds-data:/data -v "$(pwd)/backups:/backups" alpine \
+  sh -c 'cp -a /data/. /backups/'
+docker compose start mds
+```
+
+Or use `sqlite3 ... ".backup ..."` from a one-off container that mounts the
+same volume if the CLI is available.
+
+Upgrade:
+
+```bash
+git pull
+docker compose up -d --build
+curl -sS http://127.0.0.1:8080/healthz
+```
+
+Notes:
+
+- Rebuild replaces the binary; the named volume keeps devices and reports.
+- In-memory dashboard sessions are cleared on container recreate.
+- Do not run `docker compose up --scale mds=N` with N > 1.
+
+
+### 3.8 Published container image (GHCR)
+
+Release tags publish a multi-arch image:
+
+```text
+ghcr.io/sparrived/microdevicestatus:vX.Y.Z
+```
+
+Pull and run without building from source:
+
+```bash
+docker pull ghcr.io/sparrived/microdevicestatus:vX.Y.Z
+docker run -d --name microdevicestatus --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -e MDS_ADMIN_TOKEN=... \
+  -e MDS_ADMIN_USERNAME=admin \
+  -e MDS_ADMIN_PASSWORD=... \
+  -e MDS_ADDR=:8080 \
+  -e MDS_DB_PATH=/data/micro-device-status.db \
+  -v mds-data:/data \
+  ghcr.io/sparrived/microdevicestatus:vX.Y.Z
+```
+
+GitHub Release assets also include `mds-server-docker-*.tar.gz` (Compose pull
+bundle) and platform install archives. See [RELEASE.md](RELEASE.md).
+
+### 3.7 Healthcheck
+
+Compose probes `GET http://127.0.0.1:8080/healthz` inside the container via
+BusyBox `wget`. Load balancers should use the same path on the public URL.
+
+## 4. Required Configuration
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -113,9 +307,9 @@ export MDS_ADMIN_PASSWORD="..."
 
 Windows equivalent paths and env vars are listed in the Windows section below.
 
-## 4. Linux Deployment
+## 5. Linux Deployment
 
-### 4.1 Install layout
+### 5.1 Install layout
 
 ```bash
 sudo useradd --system --home /var/lib/mds --shell /usr/sbin/nologin mds || true
@@ -142,7 +336,7 @@ sudo chown root:mds /etc/mds/mds.env
 # or: sudo chown mds:mds /etc/mds/mds.env
 ```
 
-### 4.2 systemd unit
+### 5.2 systemd unit
 
 Create `/etc/systemd/system/microdevicestatus.service`:
 
@@ -186,7 +380,7 @@ Logs:
 journalctl -u microdevicestatus -f
 ```
 
-### 4.3 Reverse proxy (Caddy example)
+### 5.3 Reverse proxy (Caddy example)
 
 Caddy automatically obtains certificates when DNS points to the host:
 
@@ -196,7 +390,7 @@ status.example.com {
 }
 ```
 
-### 4.4 Reverse proxy (nginx example)
+### 5.4 Reverse proxy (nginx example)
 
 ```nginx
 server {
@@ -221,7 +415,7 @@ server {
 
 Set `MDS_COOKIE_SECURE=1` when browsers reach the service over HTTPS.
 
-### 4.5 Firewall
+### 5.5 Firewall
 
 Allow only HTTPS (and SSH for admin). Do **not** expose port `8080` publicly if
 the proxy is on the same host:
@@ -233,9 +427,9 @@ sudo ufw allow 443/tcp
 sudo ufw enable
 ```
 
-## 5. Windows Deployment
+## 6. Windows Deployment
 
-### 5.1 Install layout
+### 6.1 Install layout
 
 ```powershell
 New-Item -ItemType Directory -Force -Path C:\mds, C:\mds\data, C:\mds\logs | Out-Null
@@ -256,7 +450,7 @@ $env:MDS_COOKIE_SECURE = "1"
 Or set machine-level environment variables via System Properties / `setx` /
 deployment tooling, then restart the service process so it inherits them.
 
-### 5.2 Run as a Windows service (NSSM)
+### 6.2 Run as a Windows service (NSSM)
 
 [NSSM](https://nssm.cc/) is a simple way to wrap the console binary:
 
@@ -284,7 +478,7 @@ nssm restart MicroDeviceStatus
 nssm stop MicroDeviceStatus
 ```
 
-### 5.3 Alternative: Scheduled Task at startup
+### 6.3 Alternative: Scheduled Task at startup
 
 ```powershell
 $action = New-ScheduledTaskAction `
@@ -299,7 +493,7 @@ Environment variables for a scheduled task must be set at the machine level or
 injected by a small launcher script that loads `mds.env.ps1` then starts the
 binary.
 
-### 5.4 Reverse proxy options on Windows
+### 6.4 Reverse proxy options on Windows
 
 - **IIS** with Application Request Routing / URL Rewrite to `http://127.0.0.1:8080`
 - **Caddy for Windows** with the same Caddyfile as Linux
@@ -307,7 +501,7 @@ binary.
 
 Always set `MDS_COOKIE_SECURE=1` when clients use HTTPS.
 
-### 5.5 Firewall
+### 6.5 Firewall
 
 ```powershell
 # Prefer not exposing 8080. If needed only for private LAN testing:
@@ -316,7 +510,7 @@ New-NetFirewallRule -DisplayName "MicroDeviceStatus HTTP" -Direction Inbound -Pr
 
 For production, open only the reverse-proxy HTTPS port (443).
 
-## 6. Verify a Deployment
+## 7. Verify a Deployment
 
 ### Health
 
@@ -365,7 +559,7 @@ curl -sS -X POST https://status.example.com/api/v1/heartbeats \
   -d '{"reported_at":"2026-07-18T00:00:00Z","client_version":"0.1.0","metrics":{"cpu_percent":12.5}}'
 ```
 
-## 7. Database and Backup
+## 8. Database and Backup
 
 - Default file: `data/micro-device-status.db` relative to the process working
   directory, or the absolute path in `MDS_DB_PATH`.
@@ -397,7 +591,7 @@ Start-Service MicroDeviceStatus
 There is no built-in retention cleanup yet. Plan disk growth if many devices
 send large process lists.
 
-## 8. Upgrade
+## 9. Upgrade
 
 1. Build or download the new binary.
 2. Back up the SQLite database.
@@ -421,7 +615,7 @@ Notes:
 3. Update any automation that uses `MDS_ADMIN_TOKEN`.
 4. Existing device tokens are independent and stay valid.
 
-## 9. Security Checklist
+## 10. Security Checklist
 
 - [ ] Strong unique `MDS_ADMIN_TOKEN` and dashboard password
 - [ ] HTTPS reverse proxy; `MDS_COOKIE_SECURE=1`
@@ -431,6 +625,7 @@ Notes:
 - [ ] Database directory writable only by the service account
 - [ ] Device tokens stored only on clients, never in the browser
 - [ ] Single process only (no horizontal scale-out with sticky sessions hacks)
+- [ ] If using Docker: one container/replica, secrets only via env, volume on local disk
 
 Known MVP limits (do not ignore in production planning):
 
@@ -440,7 +635,7 @@ Known MVP limits (do not ignore in production planning):
 - No multi-instance session sharing
 - No automated retention purge
 
-## 10. Operational Endpoints
+## 11. Operational Endpoints
 
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
@@ -451,7 +646,7 @@ Known MVP limits (do not ignore in production planning):
 | `POST /api/v1/devices` | session or admin token | Provision device |
 | `POST /api/v1/heartbeats` | device token | Ingest status report |
 
-## 11. Quick Reference
+## 12. Quick Reference
 
 ```bash
 # Linux start (foreground smoke test)
@@ -473,6 +668,14 @@ $env:MDS_ADDR = "127.0.0.1:8080"
 $env:MDS_DB_PATH = "C:\mds\data\micro-device-status.db"
 $env:MDS_COOKIE_SECURE = "1"
 C:\mds\microdevicestatus.exe
+```
+
+Docker Compose smoke test:
+
+```bash
+cp .env.example .env   # set secrets
+docker compose up -d --build
+curl -sS http://127.0.0.1:8080/healthz
 ```
 
 Health check:

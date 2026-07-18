@@ -1,0 +1,14 @@
+# Build context excludes — keep the image small and free of secrets/artifacts.
+.git
+.gitignore
+data
+dist
+*.exe
+*.log
+mds_desktop
+mds_mobile
+DEPLOY.md
+PROJECT_CONTEXT.md
+README.md
+.env
+.env.local

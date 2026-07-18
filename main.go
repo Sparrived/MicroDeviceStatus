@@ -31,6 +31,9 @@ const (
 	sessionTTL  = 12 * time.Hour
 )
 
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 type server struct {
 	db            *sql.DB
 	adminSecret   string
@@ -84,7 +87,7 @@ func main() {
 		adminPassword: adminPassword,
 		sessions:      make(map[string]time.Time),
 	}
-	log.Printf("micro-device-status listening on %s", *addr)
+	log.Printf("micro-device-status %s listening on %s", version, *addr)
 	if err := http.ListenAndServe(*addr, s.routes()); err != nil {
 		log.Fatal(err)
 	}

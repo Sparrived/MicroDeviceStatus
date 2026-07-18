@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+def releaseVersionName = (project.findProperty('mds.versionName') ?: '0.1.0').toString()
+def releaseVersionCode = (project.findProperty('mds.versionCode') ?: '1').toString().toInteger()
+
 android {
     namespace 'com.microdevicestatus.mds'
     compileSdk 35
@@ -19,7 +22,24 @@ android {
         applicationId 'com.microdevicestatus.mds'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0'
+        versionCode releaseVersionCode
+        versionName releaseVersionName
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Unsigned release APK is intentional for open-source install packages.
+            // Sign with your own keystore before Play Store distribution.
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/LICENSE.txt', 'META-INF/NOTICE', 'META-INF/NOTICE.txt']
+        }
     }
 }

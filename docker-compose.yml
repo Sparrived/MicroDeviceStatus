@@ -1,0 +1,32 @@
+# Local / single-host Docker Compose for MicroDeviceStatus.
+# Production: terminate HTTPS on a reverse proxy and set MDS_COOKIE_SECURE=1.
+# Do not scale this service — sessions are in-memory (one process only).
+
+services:
+  mds:
+    build: .
+    image: microdevicestatus:local
+    container_name: microdevicestatus
+    restart: unless-stopped
+    ports:
+      # Prefer loopback on the host when a reverse proxy runs on the same machine.
+      - "127.0.0.1:8080:8080"
+    environment:
+      MDS_ADMIN_TOKEN: ${MDS_ADMIN_TOKEN:?set MDS_ADMIN_TOKEN in .env}
+      MDS_ADMIN_USERNAME: ${MDS_ADMIN_USERNAME:-admin}
+      MDS_ADMIN_PASSWORD: ${MDS_ADMIN_PASSWORD:?set MDS_ADMIN_PASSWORD in .env}
+      MDS_ADDR: ":8080"
+      MDS_DB_PATH: /data/micro-device-status.db
+      MDS_COOKIE_SECURE: ${MDS_COOKIE_SECURE:-0}
+    volumes:
+      - mds-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mds-data:
+

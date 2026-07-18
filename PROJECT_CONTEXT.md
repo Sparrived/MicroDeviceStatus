@@ -35,7 +35,7 @@ mds_desktop/            Cross-platform Go device client
 mds_mobile/             Native Android device client
 main_test.go            Database, API, token, and session tests
 README.md               Quick start and API examples
-DEPLOY.md               Production deployment for Windows and Linux
+DEPLOY.md               Production deployment (bare metal + Docker)
 PROJECT_CONTEXT.md      This document
 scripts/build.ps1       Cross-compile Windows/Linux binaries (PowerShell)
 scripts/build.sh        Cross-compile Windows/Linux binaries (bash)
@@ -88,8 +88,8 @@ Never reuse local development credentials outside local testing.
 
 ## Deployment
 
-Production install, reverse proxy, systemd and Windows service setup, backup,
-and upgrade steps are documented in [DEPLOY.md](DEPLOY.md).
+Production install (bare metal or Docker), reverse proxy, systemd and Windows
+service setup, backup, and upgrade steps are documented in [DEPLOY.md](DEPLOY.md).
 
 Deploy as a single process behind HTTPS. Keep SQLite on local disk. Set
 `MDS_COOKIE_SECURE=1` when TLS terminates outside the Go process.

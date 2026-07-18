@@ -1,0 +1,23 @@
+[Unit]
+Description=MicroDeviceStatus server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mds
+Group=mds
+EnvironmentFile=/etc/mds/mds.env
+WorkingDirectory=/var/lib/mds
+ExecStart=/opt/mds/microdevicestatus
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mds
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

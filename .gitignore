@@ -29,3 +29,9 @@ Thumbs.db
 /mds_mobile/build/
 /mds_mobile/app/build/
 /mds_mobile/local.properties
+
+# Local secrets (docker compose)
+.env
+.env.local
+/release/
+/artifacts/

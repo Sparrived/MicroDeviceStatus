@@ -1,0 +1,17 @@
+MicroDeviceStatus Docker install
+
+Prerequisites: Docker Engine + Compose v2 (or Docker Desktop).
+
+1. Copy .env.example to .env and set MDS_ADMIN_TOKEN / MDS_ADMIN_PASSWORD.
+2. Start:
+     docker compose up -d
+3. Health:
+     curl -sS http://127.0.0.1:8080/healthz
+4. Dashboard: http://127.0.0.1:8080/
+5. Production: put HTTPS in front and set MDS_COOKIE_SECURE=1, then:
+     docker compose up -d
+
+Do not scale replicas above 1. Data lives in the Docker volume mds-data.
+
+Image: see image: line in docker-compose.yml
+Docs: https://github.com/Sparrived/MicroDeviceStatus/blob/main/DEPLOY.md

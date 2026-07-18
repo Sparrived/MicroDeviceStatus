@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const defaultClientVersion = "0.1.0"
+var defaultClientVersion = "0.1.0"
 
 type config struct {
 	Endpoint        string `json:"endpoint"`

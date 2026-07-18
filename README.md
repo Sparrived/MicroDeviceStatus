@@ -6,8 +6,8 @@ them in SQLite.
 For the full architecture, API contract, authentication model, and future
 development notes, read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) first.
 
-For production install, reverse proxy, systemd/Windows service, backup, and
-upgrade steps, read [DEPLOY.md](DEPLOY.md).
+For production install (including Docker), reverse proxy, systemd/Windows
+service, backup, and upgrade steps, read [DEPLOY.md](DEPLOY.md).
 
 ## Requirements
 
@@ -81,6 +81,20 @@ Outputs land in `dist/`:
 - `microdevicestatus-windows-amd64.exe`
 - `microdevicestatus-linux-amd64`
 - `microdevicestatus-linux-arm64`
+
+## Docker
+
+Quick local/production-style run (requires Docker + Compose):
+
+```bash
+cp .env.example .env
+# set MDS_ADMIN_TOKEN and MDS_ADMIN_PASSWORD in .env
+docker compose up -d --build
+curl -sS http://127.0.0.1:8080/healthz
+```
+
+Open `http://127.0.0.1:8080/`. Full image layout, reverse proxy, backup, and
+upgrade notes are in [DEPLOY.md](DEPLOY.md#3-docker-deployment).
 
 ## API
 
@@ -166,3 +180,16 @@ Mobile location reporting is opt-in. After enabling it and granting Android
 location permission, heartbeats include latitude, longitude, accuracy, provider,
 and capture time. The server stores this in the raw report payload without a
 schema migration.
+
+## Releases
+
+GitHub Actions builds install packages for the server (binaries + Docker),
+desktop clients (Windows / Linux / macOS), and the Android APK when a version
+tag is pushed.
+
+`ash
+git tag -a v0.1.0 -m "MicroDeviceStatus v0.1.0"
+git push origin v0.1.0
+`
+
+See [RELEASE.md](RELEASE.md) for asset names, GHCR image tags, and local packaging.
