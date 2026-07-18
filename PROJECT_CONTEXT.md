@@ -55,6 +55,8 @@ Windows PowerShell:
 $env:MDS_ADMIN_TOKEN = "replace-with-a-long-device-api-token"
 $env:MDS_ADMIN_USERNAME = "admin"
 $env:MDS_ADMIN_PASSWORD = "replace-with-a-long-password"
+$env:MDS_PUBLIC_STATUS_TOKEN = "replace-with-a-separate-read-only-token"
+$env:MDS_PUBLIC_DEVICE_IDS = "computer-device-id,phone-device-id"
 go run .
 ```
 
@@ -64,6 +66,8 @@ Linux / macOS:
 export MDS_ADMIN_TOKEN="replace-with-a-long-device-api-token"
 export MDS_ADMIN_USERNAME="admin"
 export MDS_ADMIN_PASSWORD="replace-with-a-long-password"
+export MDS_PUBLIC_STATUS_TOKEN="replace-with-a-separate-read-only-token"
+export MDS_PUBLIC_DEVICE_IDS="computer-device-id,phone-device-id"
 go run .
 ```
 
@@ -80,6 +84,11 @@ Environment variables:
   provisioning. This is separate from the dashboard password.
 - `MDS_ADMIN_USERNAME`: dashboard login username.
 - `MDS_ADMIN_PASSWORD`: dashboard login password.
+- `MDS_PUBLIC_STATUS_TOKEN`: separate bearer token for the allowlisted public snapshot; never expose it to browsers.
+- `MDS_PUBLIC_DEVICE_IDS`: comma-separated device IDs allowed in the public snapshot.
+- `MDS_STATUS_ONLINE_SECONDS`: online threshold, default 300.
+- `MDS_STATUS_STALE_SECONDS`: stale threshold, default 1800.
+- `MDS_REPORT_RETENTION_DAYS`: raw report retention, default 30; set to 0 to disable cleanup.
 - `MDS_COOKIE_SECURE=1`: use when HTTPS terminates outside the Go process.
 - `MDS_ADDR`: HTTP listen address.
 - `MDS_DB_PATH`: SQLite database path.
@@ -141,9 +150,18 @@ The dashboard never needs to know device tokens.
 
 ```text
 GET /healthz
+GET /api/v1/public/snapshot
 ```
 
 Returns `{"status":"ok"}` when the database is reachable.
+
+The snapshot requires `Authorization: Bearer <MDS_PUBLIC_STATUS_TOKEN>` and
+only includes `MDS_PUBLIC_DEVICE_IDS`. It returns server-derived
+`never_seen`, `online`, `stale`, or `offline` status and a fixed projection of
+metrics, foreground app, and district-level location. It never returns device
+tokens, process lists, window titles, hostnames, or raw latitude/longitude.
+The endpoint sends `Cache-Control: no-store`; a blog server may cache its own
+proxy response.
 
 ### Admin management
 
@@ -176,7 +194,8 @@ Typical fields are `client_version`, `metrics`, `foreground_app`, `processes`,
 and an opt-in `location` object from mobile clients.
 
 The server adds `received_at` in the report record. Report payloads are capped
-at 1 MiB.
+at 1 MiB. A daily cleanup deletes reports older than
+`MDS_REPORT_RETENTION_DAYS` (30 days by default).
 
 ## Database Model
 
@@ -270,7 +289,8 @@ Known constraints:
 Recommended next implementation order:
 
 1. Add device disable/revoke management.
-2. Add retention cleanup and database backup before long-running deployment.
+2. Add automated database backups before long-running deployment; report
+   retention cleanup is now built in and controlled by `MDS_REPORT_RETENTION_DAYS`.
 3. Improve foreground-window collection where each desktop environment allows it.
 4. Add iOS only with platform-specific collection limits.
 

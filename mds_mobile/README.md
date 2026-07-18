@@ -23,5 +23,16 @@ real devices and production deployments.
 
 Location reporting is opt-in and disabled by default. Enable `上报当前位置`
 in the app and grant Android location permission to add a `location` object to
-heartbeats. It contains latitude, longitude, accuracy, provider, and capture
-time. Denying the permission leaves ordinary heartbeat reporting enabled.
+heartbeats. It contains latitude, longitude, accuracy, provider, capture time,
+and a best-effort district name. The MDS public snapshot never exposes the raw
+coordinates.
+
+Enable `开机自动恢复上报` to let the `BOOT_COMPLETED` receiver restart the
+foreground service after a reboot. Android still requires the user to allow
+notifications, background operation, and battery use without restriction; some
+manufacturers also require enabling the app's auto-start setting manually.
+
+The app can optionally request Usage Access in system settings. With that
+permission it reports the most recent non-MDS foreground application as
+`name`, `package_name`, and `captured_at`. Without it, every heartbeat sends
+`foreground_app: null` and does not misidentify MDS itself as the active app.

@@ -32,8 +32,8 @@ Rules for the MVP:
   supported.
 - Put **HTTPS** in front of the Go process. The binary does not terminate TLS.
 - Keep the SQLite file on **local disk**, not a network share.
-- Treat `MDS_ADMIN_TOKEN`, `MDS_ADMIN_USERNAME`, and `MDS_ADMIN_PASSWORD` as
-  secrets. Do not commit them.
+- Treat `MDS_ADMIN_TOKEN`, `MDS_ADMIN_USERNAME`, `MDS_ADMIN_PASSWORD`, and
+  `MDS_PUBLIC_STATUS_TOKEN` as secrets. Do not commit them.
 
 ## 2. Build Artifacts
 
@@ -174,6 +174,11 @@ Same variables as bare-metal. Inside the image defaults are:
 | `MDS_ADMIN_TOKEN` | **required** |
 | `MDS_ADMIN_USERNAME` | **required** (Compose default `admin`) |
 | `MDS_ADMIN_PASSWORD` | **required** |
+| `MDS_PUBLIC_STATUS_TOKEN` | optional read-only public snapshot token |
+| `MDS_PUBLIC_DEVICE_IDS` | optional comma-separated public device IDs |
+| `MDS_STATUS_ONLINE_SECONDS` | `300` |
+| `MDS_STATUS_STALE_SECONDS` | `1800` |
+| `MDS_REPORT_RETENTION_DAYS` | `30` |
 | `MDS_COOKIE_SECURE` | set to `1` behind HTTPS |
 
 ### 3.5 Reverse proxy in front of Docker
@@ -275,6 +280,11 @@ BusyBox `wget`. Load balancers should use the same path on the public URL.
 | `MDS_ADMIN_TOKEN` | Yes | Bearer token for provisioning devices and admin API access |
 | `MDS_ADMIN_USERNAME` | Yes | Dashboard login username |
 | `MDS_ADMIN_PASSWORD` | Yes | Dashboard login password |
+| `MDS_PUBLIC_STATUS_TOKEN` | No | Read-only bearer token for the public snapshot |
+| `MDS_PUBLIC_DEVICE_IDS` | No | Comma-separated device ID allowlist for the public snapshot |
+| `MDS_STATUS_ONLINE_SECONDS` | No | Online threshold, default `300` |
+| `MDS_STATUS_STALE_SECONDS` | No | Stale threshold, default `1800` |
+| `MDS_REPORT_RETENTION_DAYS` | No | Report retention, default `30`; `0` disables cleanup |
 | `MDS_ADDR` | No | Listen address, default `:8080` |
 | `MDS_DB_PATH` | No | SQLite path, default `data/micro-device-status.db` |
 | `MDS_COOKIE_SECURE` | No | Set to `1` when HTTPS terminates outside the process |
@@ -303,6 +313,11 @@ export MDS_COOKIE_SECURE="1"              # required behind HTTPS
 export MDS_ADMIN_TOKEN="..."
 export MDS_ADMIN_USERNAME="admin"
 export MDS_ADMIN_PASSWORD="..."
+export MDS_PUBLIC_STATUS_TOKEN="..."
+export MDS_PUBLIC_DEVICE_IDS="computer-device-id,phone-device-id"
+export MDS_STATUS_ONLINE_SECONDS="300"
+export MDS_STATUS_STALE_SECONDS="1800"
+export MDS_REPORT_RETENTION_DAYS="30"
 ```
 
 Windows equivalent paths and env vars are listed in the Windows section below.
@@ -325,6 +340,11 @@ Create `/etc/mds/mds.env` (mode `600`, owner `root:mds` or `mds:mds`):
 MDS_ADMIN_TOKEN=replace-with-a-long-random-token
 MDS_ADMIN_USERNAME=admin
 MDS_ADMIN_PASSWORD=replace-with-a-long-password
+MDS_PUBLIC_STATUS_TOKEN=replace-with-a-separate-read-only-token
+MDS_PUBLIC_DEVICE_IDS=computer-device-id,phone-device-id
+MDS_STATUS_ONLINE_SECONDS=300
+MDS_STATUS_STALE_SECONDS=1800
+MDS_REPORT_RETENTION_DAYS=30
 MDS_ADDR=127.0.0.1:8080
 MDS_DB_PATH=/var/lib/mds/micro-device-status.db
 MDS_COOKIE_SECURE=1
@@ -442,6 +462,11 @@ Create `C:\mds\mds.env.ps1` (restrict NTFS permissions to admins / service accou
 $env:MDS_ADMIN_TOKEN = "replace-with-a-long-random-token"
 $env:MDS_ADMIN_USERNAME = "admin"
 $env:MDS_ADMIN_PASSWORD = "replace-with-a-long-password"
+$env:MDS_PUBLIC_STATUS_TOKEN = "replace-with-a-separate-read-only-token"
+$env:MDS_PUBLIC_DEVICE_IDS = "computer-device-id,phone-device-id"
+$env:MDS_STATUS_ONLINE_SECONDS = "300"
+$env:MDS_STATUS_STALE_SECONDS = "1800"
+$env:MDS_REPORT_RETENTION_DAYS = "30"
 $env:MDS_ADDR = "127.0.0.1:8080"
 $env:MDS_DB_PATH = "C:\mds\data\micro-device-status.db"
 $env:MDS_COOKIE_SECURE = "1"
@@ -525,6 +550,16 @@ Through the public hostname:
 curl -sS https://status.example.com/healthz
 ```
 
+Public blog snapshot:
+
+```bash
+curl -sS https://status.example.com/api/v1/public/snapshot \
+  -H "Authorization: Bearer $MDS_PUBLIC_STATUS_TOKEN"
+```
+
+Verify that only allowlisted devices appear and that the response contains no
+tokens, process lists, full window titles, hostnames, or raw latitude/longitude.
+
 ### Dashboard login
 
 1. Open `https://status.example.com/`
@@ -588,8 +623,8 @@ Copy-Item C:\mds\data\micro-device-status.db* D:\backups\mds\ -Force
 Start-Service MicroDeviceStatus
 ```
 
-There is no built-in retention cleanup yet. Plan disk growth if many devices
-send large process lists.
+Reports older than `MDS_REPORT_RETENTION_DAYS` are removed at startup and once
+per day. Keep a database backup before upgrades or retention changes.
 
 ## 9. Upgrade
 
@@ -624,6 +659,8 @@ Notes:
 - [ ] Env file / service secrets restricted to the service account
 - [ ] Database directory writable only by the service account
 - [ ] Device tokens stored only on clients, never in the browser
+- [ ] Public snapshot token stored only by the blog server, never in the browser
+- [ ] Public device allowlist contains IDs only, not names
 - [ ] Single process only (no horizontal scale-out with sticky sessions hacks)
 - [ ] If using Docker: one container/replica, secrets only via env, volume on local disk
 
@@ -633,7 +670,8 @@ Known MVP limits (do not ignore in production planning):
 - No built-in TLS
 - Sessions lost on restart
 - No multi-instance session sharing
-- No automated retention purge
+- Retention cleanup is controlled by `MDS_REPORT_RETENTION_DAYS` and runs at
+  startup plus once per day.
 
 ## 11. Operational Endpoints
 
@@ -641,6 +679,7 @@ Known MVP limits (do not ignore in production planning):
 |----------|------|---------|
 | `GET /healthz` | none | Liveness / DB ping for load balancers |
 | `GET /` | none (login form) | Embedded dashboard |
+| `GET /api/v1/public/snapshot` | `MDS_PUBLIC_STATUS_TOKEN` | Fixed read-only snapshot for the blog |
 | `POST /api/v1/auth/login` | username/password | Create session cookie |
 | `GET /api/v1/devices` | session or admin token | List devices |
 | `POST /api/v1/devices` | session or admin token | Provision device |

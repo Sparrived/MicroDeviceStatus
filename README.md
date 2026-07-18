@@ -9,6 +9,8 @@ development notes, read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) first.
 For production install (including Docker), reverse proxy, systemd/Windows
 service, backup, and upgrade steps, read [DEPLOY.md](DEPLOY.md).
 
+For Next.js blog integration, read [BLOG_DEVICE_STATUS_GUIDE.md](BLOG_DEVICE_STATUS_GUIDE.md).
+
 ## Requirements
 
 - Go 1.25 or newer
@@ -24,6 +26,8 @@ The same source builds and runs on Windows and Linux.
 $env:MDS_ADMIN_TOKEN = "replace-with-a-long-random-token"
 $env:MDS_ADMIN_USERNAME = "admin"
 $env:MDS_ADMIN_PASSWORD = "replace-with-a-long-password"
+$env:MDS_PUBLIC_STATUS_TOKEN = "replace-with-a-separate-read-only-token"
+$env:MDS_PUBLIC_DEVICE_IDS = "computer-device-id,phone-device-id"
 go run .
 ```
 
@@ -33,6 +37,8 @@ go run .
 export MDS_ADMIN_TOKEN="replace-with-a-long-random-token"
 export MDS_ADMIN_USERNAME="admin"
 export MDS_ADMIN_PASSWORD="replace-with-a-long-password"
+export MDS_PUBLIC_STATUS_TOKEN="replace-with-a-separate-read-only-token"
+export MDS_PUBLIC_DEVICE_IDS="computer-device-id,phone-device-id"
 go run .
 ```
 
@@ -47,6 +53,11 @@ Environment variables:
 - `MDS_ADMIN_TOKEN`: token for device provisioning and query APIs.
 - `MDS_ADMIN_USERNAME`: dashboard login username.
 - `MDS_ADMIN_PASSWORD`: dashboard login password.
+- `MDS_PUBLIC_STATUS_TOKEN`: independent read-only token for the public snapshot; server-side only.
+- `MDS_PUBLIC_DEVICE_IDS`: comma-separated allowlist of device IDs for the public snapshot.
+- `MDS_STATUS_ONLINE_SECONDS`: online threshold, default `300`.
+- `MDS_STATUS_STALE_SECONDS`: stale threshold, default `1800`.
+- `MDS_REPORT_RETENTION_DAYS`: report retention, default `30`; `0` disables cleanup.
 - `MDS_COOKIE_SECURE`: set to `1` when HTTPS terminates outside the Go process.
 - `MDS_ADDR`: listen address, default `:8080`.
 - `MDS_DB_PATH`: SQLite path, default `data/micro-device-status.db`.
@@ -156,6 +167,7 @@ GET /api/v1/devices/{id}/reports?limit=50&from=2026-07-18T00:00:00Z&to=2026-07-1
 POST /api/v1/auth/login
 POST /api/v1/auth/logout
 GET /api/v1/auth/me
+GET /api/v1/public/snapshot
 ```
 
 Dashboard management APIs accept either the admin bearer token or the
@@ -163,6 +175,12 @@ Dashboard management APIs accept either the admin bearer token or the
 bearer token. Put the service behind HTTPS before connecting real devices.
 Device tokens are stored as
 SHA-256 hashes; the plaintext token is returned only during provisioning.
+
+The public snapshot requires `Authorization: Bearer <MDS_PUBLIC_STATUS_TOKEN>`
+and returns only allowlisted devices. It derives status from the server receive
+time and excludes raw coordinates, process lists, full window titles, and
+tokens. A Next.js blog should call it from a server-side route rather than from
+the browser.
 
 ## Clients
 
@@ -177,9 +195,9 @@ the same device token returned by `POST /api/v1/devices`. See
 [mds_mobile/README.md](mds_mobile/README.md).
 
 Mobile location reporting is opt-in. After enabling it and granting Android
-location permission, heartbeats include latitude, longitude, accuracy, provider,
-and capture time. The server stores this in the raw report payload without a
-schema migration.
+location permission, heartbeats include raw latitude/longitude in the private
+report plus a best-effort district name. The public snapshot only projects the
+district, accuracy, and capture time.
 
 ## Releases
 
