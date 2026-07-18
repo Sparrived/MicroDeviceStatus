@@ -9,7 +9,8 @@ MicroDeviceStatus receives periodic status reports from phone and computer
 clients, stores the reports, and exposes them through an HTTP API and a small
 built-in dashboard.
 
-The current project is the server only. Client agents are not implemented yet.
+The project contains the server plus first-party desktop and Android client
+agents. Client collection remains platform-specific and intentionally small.
 
 ## Current Stack
 
@@ -30,6 +31,8 @@ database file that runs the same way on Windows and Linux.
 main.go                 HTTP server, authentication, API, database setup
 web.go                  Embedded dashboard loader and GET /
 web/index.html          Login page and device dashboard
+mds_desktop/            Cross-platform Go device client
+mds_mobile/             Native Android device client
 main_test.go            Database, API, token, and session tests
 README.md               Quick start and API examples
 DEPLOY.md               Production deployment for Windows and Linux
@@ -169,8 +172,8 @@ POST /api/v1/heartbeats
 
 The heartbeat body is intentionally flexible JSON. The server accepts an
 optional `reported_at` RFC3339 string and preserves the remaining payload.
-Typical fields are `client_version`, `metrics`, `foreground_app`, and
-`processes`.
+Typical fields are `client_version`, `metrics`, `foreground_app`, `processes`,
+and an opt-in `location` object from mobile clients.
 
 The server adds `received_at` in the report record. Report payloads are capped
 at 1 MiB.
@@ -262,16 +265,14 @@ Known constraints:
 - There is no HTTPS termination in the Go process. Use a reverse proxy or a
   platform TLS endpoint before exposing the service.
 - There is no rate limiter or account lockout yet.
-- Client-side device collection is not part of this repository yet.
+- Desktop and Android clients keep a bounded local retry queue for outages.
 
 Recommended next implementation order:
 
-1. Build a Windows client that collects CPU, memory, disk, foreground window,
-   and process snapshots.
-2. Add client-side retry and offline buffering.
-3. Add device disable/revoke management.
-4. Add retention cleanup and database backup before long-running deployment.
-5. Add Android and iOS clients only with platform-specific collection limits.
+1. Add device disable/revoke management.
+2. Add retention cleanup and database backup before long-running deployment.
+3. Improve foreground-window collection where each desktop environment allows it.
+4. Add iOS only with platform-specific collection limits.
 
 Keep the server API HTTP/JSON and outbound-client initiated. Do not add a
 broker or WebSocket layer unless a real real-time control requirement appears.

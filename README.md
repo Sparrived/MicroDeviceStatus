@@ -149,3 +149,20 @@ Dashboard management APIs accept either the admin bearer token or the
 bearer token. Put the service behind HTTPS before connecting real devices.
 Device tokens are stored as
 SHA-256 hashes; the plaintext token is returned only during provisioning.
+
+## Clients
+
+`mds_desktop/` is a standalone Go agent for Windows, Linux, and macOS. It
+collects host metrics, sends heartbeats on a configurable interval, and keeps
+failed reports in a private JSONL retry queue. See
+[mds_desktop/README.md](mds_desktop/README.md).
+
+`mds_mobile/` is a native Android client. It uses a foreground service for
+periodic reporting, stores failed heartbeats locally for retry, and supports
+the same device token returned by `POST /api/v1/devices`. See
+[mds_mobile/README.md](mds_mobile/README.md).
+
+Mobile location reporting is opt-in. After enabling it and granting Android
+location permission, heartbeats include latitude, longitude, accuracy, provider,
+and capture time. The server stores this in the raw report payload without a
+schema migration.

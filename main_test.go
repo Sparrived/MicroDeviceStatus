@@ -37,7 +37,7 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 		t.Fatal("create response did not include device id and token")
 	}
 
-	heartbeatBody := bytes.NewBufferString(`{"reported_at":"2026-07-18T00:00:00Z","metrics":{"cpu_percent":12.5},"processes":[]}`)
+	heartbeatBody := bytes.NewBufferString(`{"reported_at":"2026-07-18T00:00:00Z","metrics":{"cpu_percent":12.5},"location":{"latitude":31.2304,"longitude":121.4737,"accuracy_meters":20},"processes":[]}`)
 	heartbeatReq := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", heartbeatBody)
 	heartbeatReq.Header.Set("Authorization", "Bearer "+created.Token)
 	heartbeatResp := httptest.NewRecorder()
@@ -56,6 +56,9 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 	}
 	if !bytes.Contains(latestResp.Body.Bytes(), []byte(`"cpu_percent":12.5`)) {
 		t.Fatalf("latest response did not contain heartbeat payload: %s", latestResp.Body.String())
+	}
+	if !bytes.Contains(latestResp.Body.Bytes(), []byte(`"latitude":31.2304`)) {
+		t.Fatalf("latest response did not contain location payload: %s", latestResp.Body.String())
 	}
 }
 

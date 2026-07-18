@@ -12,6 +12,8 @@
 /mds_desktop/desktop
 /mds_desktop/desktop.exe
 /mds_desktop/config.json
+/mds_desktop/mds-desktop.json
+/mds_desktop/*.queue.jsonl
 
 # Mobile / IDE / OS noise
 *.apk
@@ -23,3 +25,7 @@
 Thumbs.db
 *.log
 *.exe~
+/mds_mobile/.gradle/
+/mds_mobile/build/
+/mds_mobile/app/build/
+/mds_mobile/local.properties
