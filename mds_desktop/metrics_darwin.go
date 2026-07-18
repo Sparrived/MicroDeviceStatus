@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -36,11 +37,24 @@ func collectPlatformMetrics() (metricsSnapshot, error) {
 			result.DiskUsedPercent = float64(total-free) / float64(total) * 100
 		}
 	}
+	result.ForegroundApp = darwinForegroundApp()
 	result.Processes = darwinProcesses()
 	if len(collectionErrors) > 0 {
 		return result, fmt.Errorf("%s", strings.Join(collectionErrors, "; "))
 	}
 	return result, nil
+}
+
+func darwinForegroundApp() *appSnapshot {
+	output, err := exec.Command("osascript", "-e", "tell application \"System Events\" to get name of first application process whose frontmost is true").Output()
+	if err != nil {
+		return nil
+	}
+	name := strings.TrimSpace(string(output))
+	if name == "" {
+		return nil
+	}
+	return &appSnapshot{Name: name}
 }
 
 func darwinCPUPercent() (float64, error) {
@@ -55,7 +69,11 @@ func darwinCPUPercent() (float64, error) {
 			total += parsed
 		}
 	}
-	return total, nil
+	cores := runtime.NumCPU()
+	if cores < 1 {
+		cores = 1
+	}
+	return total / float64(cores), nil
 }
 
 func darwinMemory() (uint64, uint64, error) {

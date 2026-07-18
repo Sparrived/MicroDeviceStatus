@@ -26,13 +26,13 @@ type config struct {
 }
 
 type heartbeat struct {
-	ReportedAt    string             `json:"reported_at"`
-	ClientVersion string             `json:"client_version"`
-	Platform      string             `json:"platform"`
-	Hostname      string             `json:"hostname"`
-	Metrics       metricsSnapshot    `json:"metrics"`
-	ForegroundApp *appSnapshot       `json:"foreground_app,omitempty"`
-	Processes     []processSnapshot  `json:"processes,omitempty"`
+	ReportedAt    string            `json:"reported_at"`
+	ClientVersion string            `json:"client_version"`
+	Platform      string            `json:"platform"`
+	Hostname      string            `json:"hostname"`
+	Metrics       metricsSnapshot   `json:"metrics"`
+	ForegroundApp *appSnapshot      `json:"foreground_app,omitempty"`
+	Processes     []processSnapshot `json:"processes,omitempty"`
 }
 
 type appSnapshot struct {
@@ -99,8 +99,8 @@ func main() {
 
 	queuePath := strings.TrimSuffix(*configPath, filepath.Ext(*configPath)) + ".queue.jsonl"
 	a := &agent{
-		config:    cfg,
-		queuePath: queuePath,
+		config:     cfg,
+		queuePath:  queuePath,
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 	}
 

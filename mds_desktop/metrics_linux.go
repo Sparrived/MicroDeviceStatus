@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,11 +45,26 @@ func collectPlatformMetrics() (metricsSnapshot, error) {
 			result.DiskUsedPercent = float64(total-free) / float64(total) * 100
 		}
 	}
+	result.ForegroundApp = linuxForegroundApp()
 	result.Processes = linuxProcesses()
 	if len(collectionErrors) > 0 {
 		return result, fmt.Errorf("%s", strings.Join(collectionErrors, "; "))
 	}
 	return result, nil
+}
+
+func linuxForegroundApp() *appSnapshot {
+	ctx, cancel := requestContext()
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "xdotool", "getactivewindow", "getwindowname").Output()
+	if err != nil {
+		return nil
+	}
+	name := strings.TrimSpace(string(output))
+	if name == "" {
+		return nil
+	}
+	return &appSnapshot{Name: name, Title: name}
 }
 
 func linuxCPUPercent() (float64, error) {
@@ -156,12 +169,5 @@ func linuxProcesses() []processSnapshot {
 			break
 		}
 	}
-	sort.SliceStable(result, func(left, right int) bool { return result[left].CPUPercent > result[right].CPUPercent })
 	return result
-}
-
-func init() {
-	if runtime.NumCPU() < 1 {
-		panic("runtime reports no CPUs")
-	}
 }
