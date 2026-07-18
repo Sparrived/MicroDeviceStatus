@@ -36,6 +36,22 @@ func TestPlatformName(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAcceptsUTF8BOM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := append([]byte{0xef, 0xbb, 0xbf}, []byte(`{"endpoint":"http://example.test","token":"device-token","interval_seconds":30}`)...)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Endpoint != "http://example.test" || cfg.Token != "device-token" || cfg.IntervalSeconds != 30 {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
 func TestSendWithQueuePostsHeartbeat(t *testing.T) {
 	var received []byte
 	var authorization string

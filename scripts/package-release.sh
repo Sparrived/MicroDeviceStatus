@@ -38,10 +38,14 @@ build_server() {
 
 build_desktop() {
   local goos="$1" goarch="$2" outname="$3"
+  local ldflags="${LDFLAGS_DESKTOP}"
+  if [[ "${goos}" == "windows" ]]; then
+    ldflags+=" -H=windowsgui"
+  fi
   echo "  desktop ${goos}/${goarch} -> ${outname}"
   (
     cd mds_desktop
-    GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="${LDFLAGS_DESKTOP}" -o "${STAGE}/${outname}" .
+    GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags="${ldflags}" -o "${STAGE}/${outname}" .
   )
 }
 

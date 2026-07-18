@@ -186,7 +186,8 @@ try {
         if ($configDirectory) {
             New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
         }
-        $configObject | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+        $json = $configObject | ConvertTo-Json -Depth 4
+        [IO.File]::WriteAllText($ConfigPath, $json, [Text.UTF8Encoding]::new($false))
         $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 
         $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -206,7 +207,7 @@ try {
     $principal = New-ScheduledTaskPrincipal `
         -UserId $env:USERNAME `
         -LogonType Interactive `
-        -RunLevel LeastPrivilege
+        -RunLevel Limited
 
     Register-ScheduledTask `
         -TaskName $TaskName `

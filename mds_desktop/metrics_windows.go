@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 func collectPlatformMetrics() (metricsSnapshot, error) {
 	ctx, cancel := requestContext()
 	defer cancel()
 	script := `$ErrorActionPreference = "Stop"
-$os = Get-CimInstance Win32_OperatingSystem
-$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$env:SystemDrive'"
+$disk = [System.IO.DriveInfo]::new($env:SystemDrive)
 $cpu = 0
 try { $cpu = (Get-Counter '\Processor(_Total)\% Processor Time').CounterSamples[0].CookedValue } catch {}
 $processes = @(Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 8 ProcessName,Id,WorkingSet64)
@@ -23,9 +23,26 @@ using System;
 using System.Text;
 using System.Runtime.InteropServices;
 public static class MdsForegroundWindow {
+  [StructLayout(LayoutKind.Sequential)] struct MemoryStatusEx {
+    public uint Length;
+    public uint MemoryLoad;
+    public ulong TotalPhys;
+    public ulong AvailablePhys;
+    public ulong TotalPageFile;
+    public ulong AvailablePageFile;
+    public ulong TotalVirtual;
+    public ulong AvailableVirtual;
+    public ulong AvailableExtendedVirtual;
+  }
+  [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx status);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
+  public static object ReadMemory() {
+    var status = new MemoryStatusEx { Length = (uint)Marshal.SizeOf(typeof(MemoryStatusEx)) };
+    if (!GlobalMemoryStatusEx(ref status)) return null;
+    return new { total = status.TotalPhys, free = status.AvailablePhys };
+  }
   public static object Read() {
     var handle = GetForegroundWindow();
     if (handle == IntPtr.Zero) return null;
@@ -37,6 +54,7 @@ public static class MdsForegroundWindow {
   }
 }
 '@
+$memory = [MdsForegroundWindow]::ReadMemory()
 $foregroundWindow = [MdsForegroundWindow]::Read()
 $foreground = $null
 if ($foregroundWindow -ne $null) {
@@ -56,15 +74,23 @@ if ($foregroundWindow -ne $null) {
 }
 [pscustomobject]@{
   cpu_percent = [double]$cpu
-  memory_total_bytes = [uint64]($os.TotalVisibleMemorySize * 1024)
-  memory_free_bytes = [uint64]($os.FreePhysicalMemory * 1024)
-  disk_total_bytes = [uint64]$disk.Size
-  disk_free_bytes = [uint64]$disk.FreeSpace
+  memory_total_bytes = [uint64]$memory.total
+  memory_free_bytes = [uint64]$memory.free
+  disk_total_bytes = [uint64]$disk.TotalSize
+  disk_free_bytes = [uint64]$disk.AvailableFreeSpace
   foreground_app = $foreground
   processes = $processes
 } | ConvertTo-Json -Compress -Depth 4`
-	output, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script).Output()
+	command := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := command.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return metricsSnapshot{}, fmt.Errorf("windows metrics: %w", ctx.Err())
+		}
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return metricsSnapshot{}, fmt.Errorf("windows metrics: %w: %s", err, detail)
+		}
 		return metricsSnapshot{}, fmt.Errorf("windows metrics: %w", err)
 	}
 	var raw struct {

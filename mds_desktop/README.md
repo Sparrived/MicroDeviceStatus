@@ -23,6 +23,10 @@ the token in a file. Failed reports are kept in a private JSONL queue beside
 the config file and retried in order. Use an HTTPS endpoint and keep the config
 file readable only by the Windows user running the agent.
 
+The running agent checks the config file about once per second and reloads valid
+changes without restarting. If a file is temporarily invalid while editing, it
+keeps the last valid configuration and retries after the next file change.
+
 On Windows, register the agent in the interactive user session so foreground
 window collection works:
 
@@ -55,8 +59,11 @@ API and is excluded from the public blog snapshot.
 ## Build
 
 ```powershell
-go build -trimpath -o mds_desktop.exe .
+go build -trimpath -ldflags="-H=windowsgui" -o mds_desktop.exe .
 ```
+
+The `windowsgui` linker mode keeps the background agent from opening a console
+window when it is launched by Task Scheduler.
 
 Build from Linux or macOS with the corresponding `GOOS` and `GOARCH`, for
 example `GOOS=windows GOARCH=amd64 go build -trimpath -o mds_desktop.exe .`.

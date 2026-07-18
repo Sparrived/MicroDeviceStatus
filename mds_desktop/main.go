@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -64,39 +65,9 @@ func main() {
 	once := flag.Bool("once", false, "send one heartbeat and exit")
 	flag.Parse()
 
-	cfg, err := loadConfig(*configPath)
+	cfg, err := loadRuntimeConfig(*configPath, *endpoint, *token, *interval, *version)
 	if err != nil {
 		log.Fatal(err)
-	}
-	if value := strings.TrimSpace(*endpoint); value != "" {
-		cfg.Endpoint = value
-	}
-	if value := strings.TrimSpace(*token); value != "" {
-		cfg.Token = value
-	}
-	if *interval > 0 {
-		cfg.IntervalSeconds = *interval
-	}
-	if value := strings.TrimSpace(*version); value != "" {
-		cfg.ClientVersion = value
-	}
-	if value := strings.TrimSpace(os.Getenv("MDS_ENDPOINT")); cfg.Endpoint == "" && value != "" {
-		cfg.Endpoint = value
-	}
-	if value := strings.TrimSpace(os.Getenv("MDS_DEVICE_TOKEN")); cfg.Token == "" && value != "" {
-		cfg.Token = value
-	}
-	if cfg.Endpoint == "" {
-		cfg.Endpoint = "http://127.0.0.1:8080"
-	}
-	if cfg.Token == "" {
-		log.Fatal("device token is required; set token in the config file or MDS_DEVICE_TOKEN")
-	}
-	if cfg.IntervalSeconds < 5 {
-		cfg.IntervalSeconds = 60
-	}
-	if cfg.ClientVersion == "" {
-		cfg.ClientVersion = defaultClientVersion
 	}
 
 	queuePath := strings.TrimSuffix(*configPath, filepath.Ext(*configPath)) + ".queue.jsonl"
@@ -114,11 +85,33 @@ func main() {
 	}
 
 	log.Printf("mds_desktop sending to %s every %s", strings.TrimRight(cfg.Endpoint, "/"), time.Duration(cfg.IntervalSeconds)*time.Second)
+	lastConfigModTime, err := configModTime(*configPath)
+	if err != nil {
+		log.Printf("config watch unavailable: %v", err)
+	}
+	var lastHeartbeat time.Time
 	for {
-		if err := a.runCycle(); err != nil {
-			log.Printf("heartbeat deferred: %v", err)
+		currentModTime, statErr := configModTime(*configPath)
+		if statErr != nil {
+			log.Printf("config reload deferred: %v", statErr)
+		} else if !currentModTime.Equal(lastConfigModTime) {
+			lastConfigModTime = currentModTime
+			reloaded, reloadErr := loadRuntimeConfig(*configPath, *endpoint, *token, *interval, *version)
+			if reloadErr != nil {
+				log.Printf("config reload deferred: %v", reloadErr)
+			} else if reloaded != a.config {
+				a.config = reloaded
+				log.Printf("configuration reloaded: sending to %s every %s", strings.TrimRight(a.config.Endpoint, "/"), time.Duration(a.config.IntervalSeconds)*time.Second)
+			}
 		}
-		time.Sleep(time.Duration(cfg.IntervalSeconds) * time.Second)
+
+		if lastHeartbeat.IsZero() || time.Since(lastHeartbeat) >= time.Duration(a.config.IntervalSeconds)*time.Second {
+			if err := a.runCycle(); err != nil {
+				log.Printf("heartbeat deferred: %v", err)
+			}
+			lastHeartbeat = time.Now()
+		}
+		time.Sleep(time.Second)
 	}
 }
 
@@ -130,11 +123,61 @@ func loadConfig(path string) (config, error) {
 	if err != nil {
 		return config{}, fmt.Errorf("read config: %w", err)
 	}
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	var cfg config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return config{}, fmt.Errorf("decode config: %w", err)
 	}
 	return cfg, nil
+}
+
+func loadRuntimeConfig(path, endpointOverride, tokenOverride string, intervalOverride int, versionOverride string) (config, error) {
+	cfg, err := loadConfig(path)
+	if err != nil {
+		return config{}, err
+	}
+	if value := strings.TrimSpace(endpointOverride); value != "" {
+		cfg.Endpoint = value
+	}
+	if value := strings.TrimSpace(tokenOverride); value != "" {
+		cfg.Token = value
+	}
+	if intervalOverride > 0 {
+		cfg.IntervalSeconds = intervalOverride
+	}
+	if value := strings.TrimSpace(versionOverride); value != "" {
+		cfg.ClientVersion = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MDS_ENDPOINT")); cfg.Endpoint == "" && value != "" {
+		cfg.Endpoint = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MDS_DEVICE_TOKEN")); cfg.Token == "" && value != "" {
+		cfg.Token = value
+	}
+	if cfg.Endpoint == "" {
+		cfg.Endpoint = "http://127.0.0.1:8080"
+	}
+	if cfg.Token == "" {
+		return config{}, errors.New("device token is required; set token in the config file or MDS_DEVICE_TOKEN")
+	}
+	if cfg.IntervalSeconds < 5 {
+		cfg.IntervalSeconds = 60
+	}
+	if cfg.ClientVersion == "" {
+		cfg.ClientVersion = defaultClientVersion
+	}
+	return cfg, nil
+}
+
+func configModTime(path string) (time.Time, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("stat config: %w", err)
+	}
+	return info.ModTime(), nil
 }
 
 func (a *agent) runCycle() error {
@@ -278,5 +321,5 @@ func platformName() string {
 }
 
 func requestContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 3*time.Second)
+	return context.WithTimeout(context.Background(), 15*time.Second)
 }
