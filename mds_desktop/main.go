@@ -36,8 +36,10 @@ type heartbeat struct {
 }
 
 type appSnapshot struct {
-	Name  string `json:"name"`
-	Title string `json:"title,omitempty"`
+	Name        string `json:"name"`
+	ProcessName string `json:"process_name,omitempty"`
+	Title       string `json:"title,omitempty"`
+	CapturedAt  string `json:"captured_at,omitempty"`
 }
 
 type processSnapshot struct {

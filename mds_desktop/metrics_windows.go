@@ -24,17 +24,36 @@ using System.Text;
 using System.Runtime.InteropServices;
 public static class MdsForegroundWindow {
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
   public static object Read() {
     var handle = GetForegroundWindow();
     if (handle == IntPtr.Zero) return null;
+    uint processId;
+    GetWindowThreadProcessId(handle, out processId);
     var title = new StringBuilder(512);
     GetWindowText(handle, title, title.Capacity);
-    return new { name = title.ToString(), title = title.ToString() };
+    return new { pid = processId, title = title.ToString() };
   }
 }
 '@
-$foreground = [MdsForegroundWindow]::Read()
+$foregroundWindow = [MdsForegroundWindow]::Read()
+$foreground = $null
+if ($foregroundWindow -ne $null) {
+  $process = Get-Process -Id $foregroundWindow.pid -ErrorAction SilentlyContinue
+  if ($process -ne $null) {
+    $processName = $process.ProcessName + ".exe"
+    $displayName = ""
+    try { $displayName = [string]$process.MainModule.FileVersionInfo.FileDescription } catch {}
+    if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $processName }
+    $foreground = [pscustomobject]@{
+      name = $displayName
+      process_name = $processName
+      title = $foregroundWindow.title
+      captured_at = [DateTimeOffset]::UtcNow.ToString("o")
+    }
+  }
+}
 [pscustomobject]@{
   cpu_percent = [double]$cpu
   memory_total_bytes = [uint64]($os.TotalVisibleMemorySize * 1024)
