@@ -1,0 +1,11 @@
+[Unit]
+Description=MicroDeviceStatus desktop agent
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/mds-desktop -config %h/.config/mds-desktop/mds-desktop.json
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

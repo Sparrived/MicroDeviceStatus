@@ -1,11 +1,36 @@
 MicroDeviceStatus Desktop Client
 
-1. Copy config.example.json to mds-desktop.json
+1. Copy config.example.json to mds-desktop.json.
 2. Set "endpoint" to your server URL and "token" to the device token
    from POST /api/v1/devices (shown once at provisioning).
 3. Run the binary next to the config file, or pass flags:
    -endpoint https://status.example.com -token <device-token>
 4. Optional env: MDS_ENDPOINT, MDS_DEVICE_TOKEN
 5. Failed heartbeats are queued in mds-desktop.queue.jsonl and retried.
+
+Enable startup after placing the binary and config in their permanent paths:
+
+Windows (current user, at logon):
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install-mds-desktop-windows.ps1 `
+  -BinaryPath "C:\mds\mds-desktop-windows-amd64.exe" `
+  -ConfigPath "C:\mds\mds-desktop.json"
+```
+
+Linux (current user, through systemd):
+
+```bash
+install -Dm755 ./mds-desktop-linux-amd64 ~/.local/bin/mds-desktop
+install -Dm600 ./mds-desktop.json ~/.config/mds-desktop/mds-desktop.json
+install -Dm644 ./mds-desktop.service ~/.config/systemd/user/mds-desktop.service
+systemctl --user daemon-reload
+systemctl --user enable --now mds-desktop.service
+```
+
+The Windows task and Linux unit run in the logged-in user's session. This is
+required for foreground application collection; do not register the desktop
+agent as a SYSTEM service.
 
 See mds_desktop/README.md in the repository.

@@ -187,7 +187,8 @@ the browser.
 `mds_desktop/` is a standalone Go agent for Windows, Linux, and macOS. It
 collects host metrics, sends heartbeats on a configurable interval, and keeps
 failed reports in a private JSONL retry queue. See
-[mds_desktop/README.md](mds_desktop/README.md).
+[mds_desktop/README.md](mds_desktop/README.md). Desktop release packages also
+include Windows and Linux user-session startup configurations.
 
 `mds_mobile/` is a native Android client. It uses a foreground service for
 periodic reporting, stores failed heartbeats locally for retry, and supports

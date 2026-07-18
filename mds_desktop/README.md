@@ -23,21 +23,26 @@ On Windows, register the agent in the interactive user session so foreground
 window collection works:
 
 ```powershell
-$action = New-ScheduledTaskAction `
-  -Execute "C:\mds\mds_desktop.exe" `
-  -Argument "-config C:\mds\mds-desktop.json" `
-  -WorkingDirectory "C:\mds"
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$principal = New-ScheduledTaskPrincipal `
-  -UserId $env:USERNAME `
-  -LogonType Interactive `
-  -RunLevel LeastPrivilege
-Register-ScheduledTask `
-  -TaskName "MicroDeviceStatus Desktop Agent" `
-  -Action $action `
-  -Trigger $trigger `
-  -Principal $principal
+Set-ExecutionPolicy -Scope Process Bypass
+.\install-mds-desktop-windows.ps1 `
+  -BinaryPath "C:\mds\mds-desktop-windows-amd64.exe" `
+  -ConfigPath "C:\mds\mds-desktop.json"
 ```
+
+On Linux, install the user service after copying the binary and config to
+their permanent paths:
+
+```bash
+install -Dm755 ./mds-desktop-linux-amd64 ~/.local/bin/mds-desktop
+install -Dm600 ./mds-desktop.json ~/.config/mds-desktop/mds-desktop.json
+install -Dm644 ./mds-desktop.service ~/.config/systemd/user/mds-desktop.service
+systemctl --user daemon-reload
+systemctl --user enable --now mds-desktop.service
+```
+
+Both startup configurations run after the user logs in. Keep the agent in the
+interactive user session instead of running it as SYSTEM/root so foreground
+application collection remains available.
 
 Windows heartbeats include the foreground display name, executable process
 name, and capture time. The raw window title remains private to the management
