@@ -1,0 +1,10 @@
+<resources>
+    <color name="mds_ink">#142126</color>
+    <color name="mds_teal">#0B6E69</color>
+    <color name="mds_teal_dark">#074A47</color>
+    <color name="mds_mist">#E7F0ED</color>
+    <color name="mds_paper">#F7FAF8</color>
+    <color name="mds_muted">#60716F</color>
+    <color name="mds_line">#C7D8D3</color>
+    <color name="mds_white">#FFFFFF</color>
+</resources>
