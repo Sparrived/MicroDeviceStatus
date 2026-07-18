@@ -79,6 +79,145 @@ func TestAdminAndDeviceTokensAreSeparated(t *testing.T) {
 	}
 }
 
+func TestPublicSnapshotAuthAndProjection(t *testing.T) {
+	db, err := openDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	if _, err := db.Exec(`
+		INSERT INTO devices (id, name, platform, token_hash, created_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, NULL)
+	`, "public", "公开设备", "android", hashToken("public-device"), now.Add(-time.Hour).Format(time.RFC3339Nano), now.Add(-10*time.Second).Format(time.RFC3339Nano),
+		"hidden", "不公开设备", "windows", hashToken("hidden-device"), now.Add(-time.Hour).Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
+		"never", "未上线设备", "android", hashToken("never-device"), now.Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO reports (device_id, reported_at, received_at, payload)
+		VALUES (?, ?, ?, ?)
+	`, "public", now.Add(-11*time.Second).Format(time.RFC3339Nano), now.Add(-10*time.Second).Format(time.RFC3339Nano), []byte(`{"reported_at":"2026-07-18T00:00:00Z","hostname":"secret-host","metrics":{"cpu_percent":0,"battery_percent":76,"network_connected":true,"memory_percent":43.2,"disk_used_percent":68.1},"foreground_app":{"name":"微信","package_name":"com.tencent.mm","captured_at":"2026-07-18T00:00:00Z","title":"私人文档.docx - 编辑器"},"location":{"district":"滨湖区","latitude":31.49,"longitude":120.31,"accuracy_meters":80,"captured_at":"2026-07-18T00:00:00Z"},"processes":[{"name":"secret.exe","pid":123}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &server{
+		db:           db,
+		publicSecret: "public-secret",
+		publicIDs:    map[string]struct{}{"public": {}, "never": {}},
+		onlineAfter:  5 * time.Minute,
+		staleAfter:   30 * time.Minute,
+	}
+
+	for _, token := range []string{"", "admin-secret", "wrong-secret"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/public/snapshot", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp := httptest.NewRecorder()
+		s.publicSnapshot(resp, req)
+		if resp.Code != http.StatusUnauthorized {
+			t.Fatalf("token %q status = %d, want %d", token, resp.Code, http.StatusUnauthorized)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/public/snapshot", nil)
+	req.Header.Set("Authorization", "Bearer public-secret")
+	resp := httptest.NewRecorder()
+	s.publicSnapshot(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("public snapshot status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	if resp.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("cache control = %q", resp.Header().Get("Cache-Control"))
+	}
+	var snapshot struct {
+		Devices []publicDevice `json:"devices"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Devices) != 2 {
+		t.Fatalf("public devices = %d, want 2", len(snapshot.Devices))
+	}
+	if snapshot.Devices[0].ID != "never" || snapshot.Devices[0].Status != "never_seen" {
+		t.Fatalf("unexpected first public device: %+v", snapshot.Devices[0])
+	}
+	public := snapshot.Devices[1]
+	if public.ID != "public" || public.Status != "online" || public.HeartbeatAge == nil {
+		t.Fatalf("unexpected public device status: %+v", public)
+	}
+	if public.Metrics.CPUPercent == nil || *public.Metrics.CPUPercent != 0 || public.Metrics.BatteryPercent == nil || *public.Metrics.BatteryPercent != 76 {
+		t.Fatalf("metrics were not projected: %+v", public.Metrics)
+	}
+	if public.ForegroundApp == nil || public.ForegroundApp.PackageName == nil || *public.ForegroundApp.PackageName != "com.tencent.mm" {
+		t.Fatalf("foreground app was not projected: %+v", public.ForegroundApp)
+	}
+	if public.Location == nil || public.Location.District == nil || *public.Location.District != "滨湖区" {
+		t.Fatalf("location was not projected: %+v", public.Location)
+	}
+	for _, forbidden := range []string{"latitude", "longitude", "processes", "secret.exe", "私人文档", "secret-host", "public-device"} {
+		if bytes.Contains(resp.Body.Bytes(), []byte(forbidden)) {
+			t.Fatalf("public response contains forbidden field/value %q: %s", forbidden, resp.Body.String())
+		}
+	}
+}
+
+func TestPublicStatusBoundaries(t *testing.T) {
+	s := &server{onlineAfter: 5 * time.Minute, staleAfter: 30 * time.Minute}
+	now := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		age    time.Duration
+		status string
+	}{
+		{age: 299 * time.Second, status: "online"},
+		{age: 300 * time.Second, status: "stale"},
+		{age: 1799 * time.Second, status: "stale"},
+		{age: 1800 * time.Second, status: "offline"},
+	} {
+		seen := now.Add(-test.age).Format(time.RFC3339Nano)
+		status, age := s.statusForDevice(&seen, now)
+		if status != test.status || age == nil || *age != int64(test.age/time.Second) {
+			t.Fatalf("age %s => status %q, heartbeat age %v", test.age, status, age)
+		}
+	}
+	status, age := s.statusForDevice(nil, now)
+	if status != "never_seen" || age != nil {
+		t.Fatalf("never seen => status %q, age %v", status, age)
+	}
+}
+
+func TestReportRetention(t *testing.T) {
+	db, err := openDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO devices (id, name, platform, token_hash, created_at) VALUES (?, ?, ?, ?, ?)`, "retained", "Retained", "android", hashToken("retained"), now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	for _, reportedAt := range []time.Time{now.AddDate(0, 0, -31), now.AddDate(0, 0, -29)} {
+		value := reportedAt.Format(time.RFC3339Nano)
+		if _, err := db.Exec(`INSERT INTO reports (device_id, reported_at, received_at, payload) VALUES (?, ?, ?, ?)`, "retained", value, value, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&server{db: db, retentionDays: 30}).cleanupReports(now); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM reports`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("retained report count = %d, want 1", count)
+	}
+}
+
 func TestLoginSession(t *testing.T) {
 	db, err := openDB(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

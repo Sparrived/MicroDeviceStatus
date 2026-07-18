@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,11 +25,14 @@ import (
 )
 
 const (
-	maxJSONBody = 1 << 20
-	defaultAddr = ":8080"
-	defaultDB   = "data/micro-device-status.db"
-	sessionName = "mds_session"
-	sessionTTL  = 12 * time.Hour
+	maxJSONBody               = 1 << 20
+	defaultAddr               = ":8080"
+	defaultDB                 = "data/micro-device-status.db"
+	sessionName               = "mds_session"
+	sessionTTL                = 12 * time.Hour
+	defaultOnlineAfterSeconds = 300
+	defaultStaleAfterSeconds  = 1800
+	defaultRetentionDays      = 30
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
@@ -39,6 +43,11 @@ type server struct {
 	adminSecret   string
 	adminUsername string
 	adminPassword string
+	publicSecret  string
+	publicIDs     map[string]struct{}
+	onlineAfter   time.Duration
+	staleAfter    time.Duration
+	retentionDays int
 	sessions      map[string]time.Time
 	sessionsMu    sync.Mutex
 }
@@ -59,12 +68,68 @@ type report struct {
 	Payload    json.RawMessage `json:"payload"`
 }
 
+type publicStatusPolicy struct {
+	OnlineAfterSeconds int `json:"online_after_seconds"`
+	StaleAfterSeconds  int `json:"stale_after_seconds"`
+}
+
+type publicMetrics struct {
+	CPUPercent       *float64 `json:"cpu_percent"`
+	MemoryPercent    *float64 `json:"memory_percent"`
+	DiskUsedPercent  *float64 `json:"disk_used_percent"`
+	BatteryPercent   *float64 `json:"battery_percent"`
+	NetworkConnected *bool    `json:"network_connected"`
+}
+
+type publicForegroundApp struct {
+	Name        *string `json:"name"`
+	ProcessName *string `json:"process_name"`
+	PackageName *string `json:"package_name"`
+	CapturedAt  *string `json:"captured_at"`
+}
+
+type publicLocation struct {
+	District       *string  `json:"district"`
+	City           *string  `json:"city"`
+	CapturedAt     *string  `json:"captured_at"`
+	AccuracyMeters *float64 `json:"accuracy_meters"`
+}
+
+type publicDevice struct {
+	ID            string               `json:"id"`
+	Name          string               `json:"name"`
+	Platform      string               `json:"platform"`
+	Status        string               `json:"status"`
+	HeartbeatAge  *int64               `json:"heartbeat_age_seconds"`
+	LastSeenAt    *string              `json:"last_seen_at"`
+	ReportedAt    *string              `json:"reported_at"`
+	Metrics       publicMetrics        `json:"metrics"`
+	ForegroundApp *publicForegroundApp `json:"foreground_app"`
+	Location      *publicLocation      `json:"location"`
+}
+
 func main() {
 	addr := flag.String("addr", envOr("MDS_ADDR", defaultAddr), "HTTP listen address")
 	dbPath := flag.String("db", envOr("MDS_DB_PATH", defaultDB), "SQLite database path")
 	adminSecret := envOr("MDS_ADMIN_TOKEN", "")
 	adminUsername := envOr("MDS_ADMIN_USERNAME", "")
 	adminPassword := envOr("MDS_ADMIN_PASSWORD", "")
+	publicSecret := envOr("MDS_PUBLIC_STATUS_TOKEN", "")
+	onlineAfterSeconds := envInt("MDS_STATUS_ONLINE_SECONDS", defaultOnlineAfterSeconds)
+	staleAfterSeconds := envInt("MDS_STATUS_STALE_SECONDS", defaultStaleAfterSeconds)
+	if onlineAfterSeconds < 1 {
+		onlineAfterSeconds = defaultOnlineAfterSeconds
+	}
+	if staleAfterSeconds <= onlineAfterSeconds {
+		staleAfterSeconds = defaultStaleAfterSeconds
+		if staleAfterSeconds <= onlineAfterSeconds {
+			staleAfterSeconds = onlineAfterSeconds * 2
+		}
+	}
+	retentionDays := envInt("MDS_REPORT_RETENTION_DAYS", defaultRetentionDays)
+	if retentionDays < 0 {
+		retentionDays = defaultRetentionDays
+	}
 	flag.Parse()
 
 	if adminSecret == "" {
@@ -85,8 +150,17 @@ func main() {
 		adminSecret:   adminSecret,
 		adminUsername: adminUsername,
 		adminPassword: adminPassword,
+		publicSecret:  publicSecret,
+		publicIDs:     parseDeviceIDs(os.Getenv("MDS_PUBLIC_DEVICE_IDS")),
+		onlineAfter:   time.Duration(onlineAfterSeconds) * time.Second,
+		staleAfter:    time.Duration(staleAfterSeconds) * time.Second,
+		retentionDays: retentionDays,
 		sessions:      make(map[string]time.Time),
 	}
+	if err := s.cleanupReports(time.Now().UTC()); err != nil {
+		log.Printf("report retention cleanup deferred: %v", err)
+	}
+	go s.retentionLoop()
 	log.Printf("micro-device-status %s listening on %s", version, *addr)
 	if err := http.ListenAndServe(*addr, s.routes()); err != nil {
 		log.Fatal(err)
@@ -97,6 +171,7 @@ func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.dashboard)
 	mux.HandleFunc("GET /healthz", s.healthz)
+	mux.HandleFunc("GET /api/v1/public/snapshot", s.publicSnapshot)
 	mux.HandleFunc("POST /api/v1/auth/login", s.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/v1/auth/me", s.authMe)
@@ -109,12 +184,156 @@ func (s *server) routes() http.Handler {
 	return logging(mux)
 }
 
+func (s *server) retentionLoop() {
+	if s.retentionDays <= 0 {
+		return
+	}
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for now := range ticker.C {
+		if err := s.cleanupReports(now.UTC()); err != nil {
+			log.Printf("report retention cleanup failed: %v", err)
+		}
+	}
+}
+
+func (s *server) cleanupReports(now time.Time) error {
+	if s.retentionDays <= 0 {
+		return nil
+	}
+	cutoff := now.AddDate(0, 0, -s.retentionDays).Format(time.RFC3339Nano)
+	if _, err := s.db.Exec(`DELETE FROM reports WHERE reported_at < ?`, cutoff); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
+}
+
 func (s *server) healthz(w http.ResponseWriter, _ *http.Request) {
 	if err := s.db.Ping(); err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database unavailable")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *server) publicSnapshot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !s.requirePublicStatusToken(w, r) {
+		return
+	}
+
+	now := time.Now().UTC()
+	ids := make([]string, 0, len(s.publicIDs))
+	for id := range s.publicIDs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	devices := make([]publicDevice, 0, len(ids))
+	for _, id := range ids {
+		d, err := s.findDevice(id)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read public device")
+			return
+		}
+
+		status, age := s.statusForDevice(d.LastSeenAt, now)
+		item := publicDevice{
+			ID:            d.ID,
+			Name:          d.Name,
+			Platform:      d.Platform,
+			Status:        status,
+			HeartbeatAge:  age,
+			LastSeenAt:    d.LastSeenAt,
+			Metrics:       publicMetrics{},
+			ForegroundApp: nil,
+			Location:      nil,
+		}
+		latest, err := s.latestReport(d.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			devices = append(devices, item)
+			continue
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read public report")
+			return
+		}
+		item.ReportedAt = &latest.ReportedAt
+		projection, err := projectPublicPayload(latest.Payload)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to project public report")
+			return
+		}
+		item.Metrics = projection.Metrics
+		item.ForegroundApp = projection.ForegroundApp
+		item.Location = projection.Location
+		devices = append(devices, item)
+	}
+
+	thresholds := s.statusThresholds()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"generated_at": now.Format(time.RFC3339Nano),
+		"status_policy": publicStatusPolicy{
+			OnlineAfterSeconds: int(thresholds.online / time.Second),
+			StaleAfterSeconds:  int(thresholds.stale / time.Second),
+		},
+		"devices": devices,
+	})
+}
+
+func (s *server) statusThresholds() struct{ online, stale time.Duration } {
+	online := s.onlineAfter
+	if online <= 0 {
+		online = defaultOnlineAfterSeconds * time.Second
+	}
+	stale := s.staleAfter
+	if stale <= online {
+		stale = defaultStaleAfterSeconds * time.Second
+		if stale <= online {
+			stale = online * 2
+		}
+	}
+	return struct{ online, stale time.Duration }{online: online, stale: stale}
+}
+
+func (s *server) statusForDevice(lastSeen *string, now time.Time) (string, *int64) {
+	if lastSeen == nil {
+		return "never_seen", nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, *lastSeen)
+	if err != nil {
+		return "offline", nil
+	}
+	age := now.Sub(parsed)
+	if age < 0 {
+		age = 0
+	}
+	seconds := int64(age / time.Second)
+	thresholds := s.statusThresholds()
+	switch {
+	case age < thresholds.online:
+		return "online", &seconds
+	case age < thresholds.stale:
+		return "stale", &seconds
+	default:
+		return "offline", &seconds
+	}
+}
+
+func (s *server) requirePublicStatusToken(w http.ResponseWriter, r *http.Request) bool {
+	token, ok := bearerToken(r)
+	if !ok || s.publicSecret == "" {
+		writeError(w, http.StatusUnauthorized, "public status token required")
+		return false
+	}
+	if !secureEqual(token, s.publicSecret) {
+		writeError(w, http.StatusUnauthorized, "invalid public status token")
+		return false
+	}
+	return true
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
@@ -311,19 +530,99 @@ func (s *server) getLatest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var item report
-	if err := s.db.QueryRow(`
-		SELECT id, reported_at, received_at, payload
-		FROM reports WHERE device_id = ?
-		ORDER BY id DESC LIMIT 1
-	`, deviceID).Scan(&item.ID, &item.ReportedAt, &item.ReceivedAt, &item.Payload); errors.Is(err, sql.ErrNoRows) {
+	item, err := s.latestReport(deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
 		writeJSON(w, http.StatusOK, map[string]any{"report": nil})
 		return
-	} else if err != nil {
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read latest report")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"report": item})
+}
+
+func (s *server) latestReport(deviceID string) (report, error) {
+	var item report
+	err := s.db.QueryRow(`
+		SELECT id, reported_at, received_at, payload
+		FROM reports WHERE device_id = ?
+		ORDER BY id DESC LIMIT 1
+	`, deviceID).Scan(&item.ID, &item.ReportedAt, &item.ReceivedAt, &item.Payload)
+	return item, err
+}
+
+type publicProjection struct {
+	Metrics       publicMetrics
+	ForegroundApp *publicForegroundApp
+	Location      *publicLocation
+}
+
+func projectPublicPayload(payload []byte) (publicProjection, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return publicProjection{}, err
+	}
+	result := publicProjection{}
+	if value, ok := raw["metrics"]; ok {
+		var metrics struct {
+			CPUPercent       *float64 `json:"cpu_percent"`
+			MemoryPercent    *float64 `json:"memory_percent"`
+			DiskUsedPercent  *float64 `json:"disk_used_percent"`
+			BatteryPercent   *float64 `json:"battery_percent"`
+			NetworkConnected *bool    `json:"network_connected"`
+		}
+		if json.Unmarshal(value, &metrics) == nil {
+			result.Metrics = publicMetrics{
+				CPUPercent:       metrics.CPUPercent,
+				MemoryPercent:    metrics.MemoryPercent,
+				DiskUsedPercent:  metrics.DiskUsedPercent,
+				BatteryPercent:   metrics.BatteryPercent,
+				NetworkConnected: metrics.NetworkConnected,
+			}
+		}
+	}
+	if value, ok := raw["foreground_app"]; ok && string(value) != "null" {
+		var app struct {
+			Name        string `json:"name"`
+			ProcessName string `json:"process_name"`
+			PackageName string `json:"package_name"`
+			CapturedAt  string `json:"captured_at"`
+		}
+		if json.Unmarshal(value, &app) == nil {
+			result.ForegroundApp = &publicForegroundApp{
+				Name:        nonEmptyString(app.Name),
+				ProcessName: nonEmptyString(app.ProcessName),
+				PackageName: nonEmptyString(app.PackageName),
+				CapturedAt:  nonEmptyString(app.CapturedAt),
+			}
+		}
+	}
+	if value, ok := raw["location"]; ok && string(value) != "null" {
+		var location struct {
+			District       string   `json:"district"`
+			City           string   `json:"city"`
+			CapturedAt     string   `json:"captured_at"`
+			AccuracyMeters *float64 `json:"accuracy_meters"`
+		}
+		if json.Unmarshal(value, &location) == nil {
+			result.Location = &publicLocation{
+				District:       nonEmptyString(location.District),
+				City:           nonEmptyString(location.City),
+				CapturedAt:     nonEmptyString(location.CapturedAt),
+				AccuracyMeters: location.AccuracyMeters,
+			}
+		}
+	}
+	return result, nil
+}
+
+func nonEmptyString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (s *server) listReports(w http.ResponseWriter, r *http.Request) {
@@ -594,6 +893,28 @@ func envOr(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envInt(name string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func parseDeviceIDs(value string) map[string]struct{} {
+	ids := make(map[string]struct{})
+	for _, item := range strings.Split(value, ",") {
+		if id := strings.TrimSpace(item); id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
 }
 
 func logging(next http.Handler) http.Handler {
