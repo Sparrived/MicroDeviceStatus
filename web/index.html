@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MicroDeviceStatus</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1014;
+      --panel: #121a20;
+      --panel-2: #172129;
+      --line: #273640;
+      --text: #eef4f2;
+      --muted: #8e9ca5;
+      --cyan: #62e6d2;
+      --blue: #8cb4ff;
+      --amber: #ffc36e;
+      --red: #ff7884;
+      --shadow: 0 18px 45px rgba(0, 0, 0, .24);
+    }
+
+    * { box-sizing: border-box; }
+
+    [hidden] { display: none !important; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    button, input, select { font: inherit; }
+
+    button { cursor: pointer; }
+
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 2px;
+    }
+
+    .signal {
+      height: 3px;
+      background: var(--cyan);
+      box-shadow: 0 0 22px rgba(98, 230, 210, .42);
+    }
+
+    .login-view {
+      display: grid;
+      min-height: 100vh;
+      place-items: center;
+      padding: 24px;
+      background: var(--bg);
+    }
+
+    .login-panel {
+      width: min(430px, 100%);
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-top: 3px solid var(--cyan);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .login-panel h1 { margin-top: 8px; font-size: 32px; }
+    .login-panel .subtitle { margin-bottom: 24px; }
+    .login-form { display: grid; gap: 14px; }
+    .login-form label { color: var(--muted); font-size: 12px; }
+    .login-form input { display: block; width: 100%; margin-top: 6px; padding: 0 12px; min-height: 42px; border: 1px solid var(--line); border-radius: 5px; background: #0d1419; color: var(--text); }
+    .login-form .button { width: 100%; margin-top: 4px; }
+    .login-error { min-height: 20px; color: var(--red); font-size: 12px; }
+
+    .shell {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 34px 30px 60px;
+    }
+
+    .masthead {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 26px;
+    }
+
+    .eyebrow, .kicker, .table-head, .meta-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .eyebrow { margin-bottom: 6px; }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.05;
+      letter-spacing: 0;
+      font-weight: 680;
+    }
+
+    h1 span { color: var(--cyan); }
+
+    .subtitle {
+      margin-top: 10px;
+      color: var(--muted);
+    }
+
+    .header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .button, .token-form input, .create-form input, .create-form select, .search {
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .button {
+      padding: 0 14px;
+      font-weight: 700;
+    }
+
+    .button:hover { border-color: var(--cyan); }
+
+    .button.primary {
+      border-color: var(--cyan);
+      background: var(--cyan);
+      color: #071312;
+    }
+
+    .button.ghost { background: transparent; }
+
+    .access-bar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: end;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--cyan);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .token-form { display: flex; gap: 8px; }
+
+    .token-form input, .search, .create-form input, .create-form select {
+      width: 100%;
+      padding: 0 12px;
+    }
+
+    .token-form input { font-family: "Cascadia Code", Consolas, monospace; }
+
+    .meta-label { display: block; margin-bottom: 7px; }
+
+    .access-status { min-height: 40px; display: flex; align-items: center; color: var(--muted); }
+    .access-status.ready { color: var(--cyan); }
+    .access-status.error { color: var(--red); }
+    .session-copy { display: flex; align-items: center; gap: 8px; color: var(--text); }
+    .session-copy strong { color: var(--cyan); font-weight: 650; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    .stat {
+      padding: 18px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .stat strong {
+      display: block;
+      margin: 3px 0 2px;
+      color: var(--text);
+      font: 650 32px/1 "Cascadia Code", Consolas, monospace;
+    }
+
+    .stat .note { color: var(--muted); font-size: 12px; }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(360px, .92fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-header h2 { font-size: 16px; font-weight: 700; }
+
+    .panel-header .sub { color: var(--muted); font-size: 12px; }
+
+    .list-tools { display: flex; gap: 8px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+
+    .device-list { min-height: 290px; }
+
+    .device-row {
+      display: grid;
+      grid-template-columns: 10px minmax(120px, 1.4fr) minmax(90px, .75fr) minmax(120px, .95fr) auto;
+      gap: 12px;
+      align-items: center;
+      width: 100%;
+      padding: 15px 20px;
+      border: 0;
+      border-bottom: 1px solid rgba(39, 54, 64, .72);
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+    }
+
+    .device-row:hover, .device-row.selected { background: var(--panel-2); }
+    .device-row.selected { box-shadow: inset 3px 0 0 var(--cyan); }
+
+    .device-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+    .device-id, .device-time, .platform { color: var(--muted); font-size: 12px; }
+    .device-id { display: block; }
+    .device-id { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "Cascadia Code", Consolas, monospace; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .status-dot.live { background: var(--cyan); box-shadow: 0 0 12px rgba(98, 230, 210, .65); }
+    .status-dot.stale { background: var(--amber); }
+    .status-dot.offline { background: var(--red); }
+    .status-text { color: var(--muted); font-size: 12px; }
+    .status-text.live { color: var(--cyan); }
+    .status-text.stale { color: var(--amber); }
+    .status-text.offline { color: var(--red); }
+
+    .empty {
+      display: grid;
+      place-items: center;
+      min-height: 290px;
+      padding: 28px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .empty strong { display: block; margin-bottom: 5px; color: var(--text); }
+
+    .detail-body { padding: 20px; }
+
+    .detail-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 20px; }
+    .detail-title h3 { font-size: 24px; line-height: 1.15; }
+    .detail-title .device-id { margin-top: 7px; }
+
+    .detail-status { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .detail-metric { padding: 12px; border: 1px solid var(--line); background: var(--panel-2); }
+    .detail-metric strong { display: block; margin-top: 4px; font-size: 14px; overflow-wrap: anywhere; }
+
+    .data-block { margin-top: 18px; }
+    .data-block h3 { padding-bottom: 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    pre { max-height: 220px; margin: 10px 0 0; padding: 12px; overflow: auto; border: 1px solid var(--line); background: #0d1419; color: #c7d5d7; font: 12px/1.55 "Cascadia Code", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+    .history { margin-top: 22px; }
+    .history-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+    .history-head h3 { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .history-head span { color: var(--muted); font-size: 12px; }
+    .history-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(39, 54, 64, .72); }
+    .history-row time { color: var(--text); font-size: 12px; }
+    .history-row small { display: block; color: var(--muted); }
+
+    dialog {
+      width: min(440px, calc(100% - 28px));
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+    }
+
+    dialog::backdrop { background: rgba(3, 7, 10, .74); }
+    .dialog-body { padding: 22px; }
+    .dialog-body h2 { margin-bottom: 5px; font-size: 20px; }
+    .dialog-note { margin-bottom: 18px; color: var(--muted); font-size: 12px; }
+    .create-form { display: grid; gap: 12px; }
+    .create-form label { color: var(--muted); font-size: 12px; }
+    .create-form input, .create-form select { display: block; margin-top: 6px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .token-result { margin-top: 16px; padding: 12px; border-left: 3px solid var(--cyan); background: #0d2221; }
+    .token-result code { display: block; margin: 7px 0 10px; color: var(--cyan); overflow-wrap: anywhere; font: 12px/1.5 "Cascadia Code", Consolas, monospace; }
+
+    @media (max-width: 960px) {
+      .workspace { grid-template-columns: 1fr; }
+      .detail-panel { order: -1; }
+    }
+
+    @media (max-width: 640px) {
+      .shell { padding: 24px 14px 40px; }
+      .masthead, .access-bar { display: block; }
+      .header-actions { justify-content: flex-start; margin-top: 18px; }
+      .token-form { margin-top: 8px; }
+      .access-status { margin-top: 8px; }
+      .stats { gap: 6px; }
+      .stat { padding: 13px 10px; }
+      .stat strong { font-size: 24px; }
+      .device-row { grid-template-columns: 8px minmax(100px, 1fr) auto; gap: 8px; padding: 13px 14px; }
+      .device-row .platform, .device-row .device-time { display: none; }
+      .panel-header, .list-tools { padding-left: 14px; padding-right: 14px; }
+      .detail-body { padding: 14px; }
+      .detail-title h3 { font-size: 21px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <section class="login-view" id="loginView">
+    <div class="login-panel">
+      <div class="eyebrow">Device status control room</div>
+      <h1>MicroDevice<span>Status</span></h1>
+      <p class="subtitle">登录后查看设备心跳与运行快照</p>
+      <form class="login-form" id="loginForm">
+        <label>用户名<input name="username" autocomplete="username" required placeholder="管理员用户名"></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required placeholder="管理员密码"></label>
+        <button class="button primary" type="submit">登录</button>
+        <div class="login-error" id="loginError" role="alert"></div>
+      </form>
+    </div>
+  </section>
+
+  <div id="appView" hidden>
+    <div class="signal"></div>
+    <main class="shell">
+    <header class="masthead">
+      <div>
+        <div class="eyebrow">Device status control room</div>
+        <h1>MicroDevice<span>Status</span></h1>
+        <p class="subtitle">设备心跳、状态与运行快照</p>
+      </div>
+      <div class="header-actions">
+        <button class="button ghost" id="refreshButton" type="button">刷新数据</button>
+        <button class="button primary" id="createButton" type="button">添加设备</button>
+        <button class="button ghost" id="logoutButton" type="button">退出登录</button>
+      </div>
+    </header>
+
+    <section class="access-bar" aria-label="管理员访问">
+      <div>
+        <span class="meta-label">管理员会话</span>
+        <div class="session-copy"><span class="status-dot live"></span><span>已通过服务端验证 · <strong id="sessionUser">--</strong></span></div>
+      </div>
+      <div class="access-status ready" id="accessStatus">已连接</div>
+    </section>
+
+    <section class="stats" aria-label="设备统计">
+      <div class="stat"><span class="kicker">设备总数</span><strong id="totalCount">--</strong><span class="note">已注册设备</span></div>
+      <div class="stat"><span class="kicker">最近在线</span><strong id="liveCount">--</strong><span class="note">五分钟内有心跳</span></div>
+      <div class="stat"><span class="kicker">待确认</span><strong id="staleCount">--</strong><span class="note">超过五分钟未上报</span></div>
+    </section>
+
+    <section class="workspace">
+      <section class="panel devices-panel">
+        <div class="panel-header">
+          <div><h2>设备列表</h2><span class="sub" id="lastSync">尚未同步</span></div>
+          <span class="table-head" id="deviceCountLabel">0 devices</span>
+        </div>
+        <div class="list-tools"><input class="search" id="searchInput" type="search" placeholder="搜索名称、平台或设备 ID"></div>
+        <div class="device-list" id="deviceList"><div class="empty"><div><strong>还没有设备数据</strong><span>连接管理员 Token 后开始查看</span></div></div></div>
+      </section>
+
+      <section class="panel detail-panel">
+        <div class="panel-header"><div><h2>设备详情</h2><span class="sub">最新状态与历史心跳</span></div></div>
+        <div class="detail-body" id="detailBody"><div class="empty"><div><strong>选择一台设备</strong><span>设备快照会显示在这里</span></div></div></div>
+      </section>
+    </section>
+    </main>
+  </div>
+
+  <dialog id="createDialog">
+    <div class="dialog-body">
+      <h2>添加设备</h2>
+      <p class="dialog-note">创建后 Token 只显示一次，请交给对应客户端保存。</p>
+      <form class="create-form" id="createForm">
+        <label>设备名称<input name="name" required maxlength="120" placeholder="例如：办公室电脑"></label>
+        <label>平台<select name="platform"><option value="windows">Windows</option><option value="macos">macOS</option><option value="linux">Linux</option><option value="android">Android</option><option value="ios">iOS</option></select></label>
+        <div class="dialog-actions"><button class="button ghost" id="cancelCreateButton" type="button">取消</button><button class="button primary" type="submit">创建设备</button></div>
+      </form>
+      <div class="token-result" id="tokenResult" hidden><span class="kicker">设备 Token</span><code id="createdToken"></code><button class="button" id="copyTokenButton" type="button">复制 Token</button></div>
+    </div>
+  </dialog>
+
+  <script>
+    (() => {
+      const state = { authenticated: false, devices: [], selectedId: "" };
+      const $ = (id) => document.getElementById(id);
+      const accessStatus = $("accessStatus");
+
+      function setAccess(text, type = "") {
+        accessStatus.textContent = text;
+        accessStatus.className = "access-status " + type;
+      }
+
+      function headers() {
+        return { "Content-Type": "application/json" };
+      }
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, { ...options, credentials: "same-origin", headers: { ...headers(), ...(options.headers || {}) } });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || ("HTTP " + response.status));
+        return body;
+      }
+
+      function showLogin(message = "") {
+        state.authenticated = false;
+        $("loginView").hidden = false;
+        $("appView").hidden = true;
+        $("loginError").textContent = message;
+      }
+
+      function showApp(username) {
+        state.authenticated = true;
+        $("loginView").hidden = true;
+        $("appView").hidden = false;
+        $("sessionUser").textContent = username;
+      }
+
+      function escapeHTML(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+      }
+
+      function dateText(value) {
+        if (!value) return "从未上报";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
+      }
+
+      function statusFor(device) {
+        if (!device.last_seen_at) return { label: "离线", key: "offline" };
+        const age = Date.now() - new Date(device.last_seen_at).getTime();
+        if (age < 5 * 60 * 1000) return { label: "最近在线", key: "live" };
+        if (age < 30 * 60 * 1000) return { label: "延迟", key: "stale" };
+        return { label: "离线", key: "offline" };
+      }
+
+      function renderStats() {
+        const statuses = state.devices.map(statusFor);
+        $("totalCount").textContent = state.devices.length;
+        $("liveCount").textContent = statuses.filter((item) => item.key === "live").length;
+        $("staleCount").textContent = statuses.filter((item) => item.key !== "live").length;
+        $("deviceCountLabel").textContent = state.devices.length + " devices";
+      }
+
+      function renderDevices() {
+        const query = $("searchInput").value.trim().toLowerCase();
+        const visible = state.devices.filter((device) => [device.name, device.platform, device.id].join(" ").toLowerCase().includes(query));
+        if (!visible.length) {
+          $("deviceList").innerHTML = '<div class="empty"><div><strong>没有匹配设备</strong><span>调整搜索条件或添加一台设备</span></div></div>';
+          return;
+        }
+        $("deviceList").innerHTML = visible.map((device) => {
+          const status = statusFor(device);
+          return '<button class="device-row ' + (device.id === state.selectedId ? "selected" : "") + '" data-device-id="' + escapeHTML(device.id) + '" type="button">' +
+            '<span class="status-dot ' + status.key + '"></span>' +
+            '<span><span class="device-name">' + escapeHTML(device.name) + '</span><span class="device-id">' + escapeHTML(device.id) + '</span></span>' +
+            '<span class="platform">' + escapeHTML(device.platform) + '</span>' +
+            '<span class="device-time">' + escapeHTML(dateText(device.last_seen_at)) + '</span>' +
+            '<span class="status-text ' + status.key + '">' + status.label + '</span></button>';
+        }).join("");
+      }
+
+      function pretty(value) {
+        return escapeHTML(JSON.stringify(value ?? {}, null, 2));
+      }
+
+      async function renderDetail(device) {
+        if (!device) {
+          $("detailBody").innerHTML = '<div class="empty"><div><strong>选择一台设备</strong><span>设备快照会显示在这里</span></div></div>';
+          return;
+        }
+        const status = statusFor(device);
+        $("detailBody").innerHTML = '<div class="detail-title"><div><h3>' + escapeHTML(device.name) + '</h3><div class="device-id">' + escapeHTML(device.id) + '</div></div><div class="detail-status"><span class="status-dot ' + status.key + '"></span><span class="status-text ' + status.key + '">' + status.label + '</span></div></div><div class="detail-grid"><div class="detail-metric"><span class="meta-label">平台</span><strong>' + escapeHTML(device.platform) + '</strong></div><div class="detail-metric"><span class="meta-label">最后接收</span><strong>' + escapeHTML(dateText(device.last_seen_at)) + '</strong></div><div class="detail-metric"><span class="meta-label">创建时间</span><strong>' + escapeHTML(dateText(device.created_at)) + '</strong></div><div class="detail-metric"><span class="meta-label">设备状态</span><strong>' + (device.disabled ? "已禁用" : "可用") + '</strong></div></div><div id="latestBlock"><div class="empty"><div><strong>正在读取最新心跳</strong></div></div></div><div class="history" id="historyBlock"></div>';
+        try {
+          const [latest, history] = await Promise.all([api("/api/v1/devices/" + encodeURIComponent(device.id) + "/latest"), api("/api/v1/devices/" + encodeURIComponent(device.id) + "/reports?limit=8")]);
+          const payload = latest.report ? latest.report.payload : null;
+          $("latestBlock").innerHTML = '<div class="data-block"><h3>最新心跳 · ' + escapeHTML(latest.report ? dateText(latest.report.reported_at) : "暂无") + '</h3>' + (payload ? '<pre>' + pretty(payload) + '</pre>' : '<div class="empty"><div><strong>暂无心跳</strong><span>客户端上报后会显示在这里</span></div></div>') + '</div>';
+          const rows = history.reports || [];
+          $("historyBlock").innerHTML = '<div class="history-head"><h3>历史心跳</h3><span>' + rows.length + ' records</span></div>' + (rows.length ? rows.map((item) => '<div class="history-row"><div><time>' + escapeHTML(dateText(item.reported_at)) + '</time><small>服务器接收：' + escapeHTML(dateText(item.received_at)) + '</small></div><span class="status-text live">已保存</span></div>').join("") : '<div class="empty"><div><strong>暂无历史记录</strong></div></div>');
+        } catch (error) {
+          $("latestBlock").innerHTML = '<div class="empty"><div><strong>读取详情失败</strong><span>' + escapeHTML(error.message) + '</span></div></div>';
+        }
+      }
+
+      async function loadDevices() {
+        setAccess("正在同步…", "");
+        try {
+          const body = await api("/api/v1/devices");
+          state.devices = body.devices || [];
+          if (!state.devices.some((device) => device.id === state.selectedId)) state.selectedId = state.devices[0]?.id || "";
+          renderStats();
+          renderDevices();
+          $("lastSync").textContent = "上次同步 " + new Intl.DateTimeFormat("zh-CN", { timeStyle: "medium" }).format(new Date());
+          setAccess("已连接", "ready");
+          await renderDetail(state.devices.find((device) => device.id === state.selectedId));
+        } catch (error) {
+          setAccess(error.message, "error");
+          if (error.message === "login required") showLogin("会话已过期，请重新登录");
+        }
+      }
+
+      async function checkSession() {
+        try {
+          const body = await api("/api/v1/auth/me");
+          showApp(body.username);
+          await loadDevices();
+        } catch (error) {
+          showLogin("");
+        }
+      }
+
+      $("deviceList").addEventListener("click", (event) => {
+        const row = event.target.closest("[data-device-id]");
+        if (!row) return;
+        state.selectedId = row.dataset.deviceId;
+        renderDevices();
+        renderDetail(state.devices.find((device) => device.id === state.selectedId));
+      });
+      $("searchInput").addEventListener("input", renderDevices);
+      $("refreshButton").addEventListener("click", loadDevices);
+      $("loginForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const data = new FormData(form);
+        $("loginError").textContent = "正在验证…";
+        try {
+          const body = await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ username: data.get("username"), password: data.get("password") }) });
+          form.reset();
+          showApp(body.username);
+          await loadDevices();
+        } catch (error) {
+          showLogin(error.message === "invalid username or password" ? "用户名或密码错误" : error.message);
+        }
+      });
+      $("logoutButton").addEventListener("click", async () => {
+        await api("/api/v1/auth/logout", { method: "POST" }).catch(() => {});
+        showLogin("已退出登录");
+      });
+
+      const dialog = $("createDialog");
+      $("createButton").addEventListener("click", () => {
+        $("tokenResult").hidden = true;
+        $("createForm").reset();
+        dialog.showModal();
+      });
+      $("cancelCreateButton").addEventListener("click", () => dialog.close());
+      $("createForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        try {
+          const created = await api("/api/v1/devices", { method: "POST", body: JSON.stringify({ name: data.get("name"), platform: data.get("platform") }) });
+          $("createdToken").textContent = created.token;
+          $("tokenResult").hidden = false;
+          await loadDevices();
+        } catch (error) {
+          setAccess(error.message, "error");
+        }
+      });
+      $("copyTokenButton").addEventListener("click", async () => {
+        await navigator.clipboard.writeText($("createdToken").textContent);
+        $("copyTokenButton").textContent = "已复制";
+        setTimeout(() => { $("copyTokenButton").textContent = "复制 Token"; }, 1500);
+      });
+      setInterval(() => { if (state.authenticated) loadDevices(); }, 30000);
+      checkSession();
+    })();
+  </script>
+</body>
+</html>

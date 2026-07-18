@@ -1,0 +1,6 @@
+{
+  "endpoint": "https://mds.example.com",
+  "token": "paste-the-device-token-here",
+  "interval_seconds": 60,
+  "client_version": "0.1.0"
+}

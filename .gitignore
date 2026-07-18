@@ -1,0 +1,25 @@
+# Runtime data
+/data/
+
+# Build outputs
+/dist/
+/microdevicestatus
+/microdevicestatus.exe
+/microdevicestatus-linux-*
+/microdevicestatus-windows-*
+
+# Desktop client build artifacts
+/mds_desktop/desktop
+/mds_desktop/desktop.exe
+/mds_desktop/config.json
+
+# Mobile / IDE / OS noise
+*.apk
+*.aab
+*.iml
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+*.exe~
