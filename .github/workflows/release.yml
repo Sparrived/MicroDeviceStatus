@@ -1,13 +1,13 @@
-name: Release
+name: Release Server
 
 on:
   push:
     tags:
-      - "v*"
+      - "server-v*"
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version without v prefix (e.g. 0.2.0). Empty = date-based draft."
+        description: "Server version without prefix (e.g. 0.3.0). Empty = draft."
         required: false
         default: ""
       publish:
@@ -21,13 +21,12 @@ permissions:
   packages: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-server-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   GO_VERSION: "1.25.x"
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/microdevicestatus
 
 jobs:
   prepare:
@@ -35,34 +34,41 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
-      should_publish: ${{ steps.meta.outputs.should_publish }}
       image: ${{ steps.meta.outputs.image }}
+      should_publish: ${{ steps.meta.outputs.should_publish }}
+      draft: ${{ steps.meta.outputs.draft }}
     steps:
       - name: Resolve version
         id: meta
         shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            raw="${{ inputs.version }}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            raw="$DISPATCH_VERSION"
+            publish="$DISPATCH_PUBLISH"
+            draft=false
             if [[ -z "$raw" ]]; then
               raw="0.0.0-draft.$(date -u +%Y%m%d%H%M%S)"
+              draft=true
             fi
-            publish="${{ inputs.publish }}"
           else
-            raw="${GITHUB_REF_NAME}"
-            publish="true"
+            raw="${GITHUB_REF_NAME#server-v}"
+            publish=true
+            draft=false
           fi
-          raw="${raw#v}"
           owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           image="ghcr.io/${owner}/microdevicestatus"
           echo "version=${raw}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${raw}" >> "$GITHUB_OUTPUT"
-          echo "should_publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "tag=server-v${raw}" >> "$GITHUB_OUTPUT"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
-          echo "Resolved version=v${raw} publish=${publish} image=${image}"
+          echo "should_publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "draft=${draft}" >> "$GITHUB_OUTPUT"
+          echo "Resolved server version=server-v${raw} publish=${publish} image=${image}"
 
-  server-and-desktop:
+  server-packages:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
@@ -77,81 +83,39 @@ jobs:
             go.sum
             mds_desktop/go.mod
 
-      - name: Package server and desktop
+      - name: Package server archives
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
+          set -euo pipefail
           chmod +x scripts/package-release.sh scripts/build.sh scripts/docker-entrypoint.sh
-          ./scripts/package-release.sh "${VERSION}"
-
-      - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: server-desktop-packages
-          path: |
-            dist/release/*.zip
-            dist/release/*.tar.gz
-            dist/release/SHA256SUMS.txt
-            dist/release/release-manifest.json
-            dist/release/bin/**
-          if-no-files-found: error
-
-  android:
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept licenses and install platform
-        shell: bash
-        run: |
-          set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
-
-      - name: Build release APK
-        working-directory: mds_mobile
-        shell: bash
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          set -euo pipefail
-          chmod +x gradlew || true
-          # Convert version like 1.2.3 or 0.0.0-draft.x into integer versionCode
-          version_code="$(echo "$VERSION" | awk -F'[.-]' '{
-            major=$1+0; minor=$2+0; patch=$3+0;
-            if (major==0 && minor==0 && patch==0) { print 1; exit }
-            print major*10000 + minor*100 + patch
-          }')"
-          ./gradlew --no-daemon assembleRelease \
-            -Pmds.versionName="$VERSION" \
-            -Pmds.versionCode="$version_code"
-          mkdir -p ../dist/release
-          cp app/build/outputs/apk/release/*.apk \
-            "../dist/release/mds-mobile-android-${VERSION}.apk"
+          ./scripts/package-release.sh "$VERSION"
+          mkdir -p dist/server
+          find dist/release -maxdepth 1 -type f \
+            \( -name 'mds-server-*.zip' -o -name 'mds-server-*.tar.gz' \) \
+            -exec cp {} dist/server/ \;
           (
-            cd ../dist/release
-            sha256sum "mds-mobile-android-${VERSION}.apk" > "mds-mobile-android-${VERSION}.apk.sha256"
+            cd dist/server
+            sha256sum *.zip *.tar.gz > SHA256SUMS.txt
           )
+          cat > dist/server/release-manifest.json <<EOF
+          {
+            "name": "MicroDeviceStatus",
+            "component": "server",
+            "version": "${VERSION}",
+            "tag": "${TAG}",
+            "artifacts": ["windows-amd64", "linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "docker"]
+          }
+          EOF
+          sed -i 's/^          //' dist/server/release-manifest.json
 
-      - name: Upload Android APK
+      - name: Upload server packages
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: |
-            dist/release/mds-mobile-android-*.apk
-            dist/release/mds-mobile-android-*.apk.sha256
+          name: server-packages
+          path: dist/server/*
           if-no-files-found: error
 
   docker:
@@ -181,8 +145,8 @@ jobs:
         with:
           images: ${{ needs.prepare.outputs.image }}
           tags: |
-            type=raw,value=${{ needs.prepare.outputs.tag }}
-            type=raw,value=latest,enable=${{ needs.prepare.outputs.should_publish == 'true' && !contains(needs.prepare.outputs.version, '-') }}
+            type=raw,value=v${{ needs.prepare.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.should_publish == 'true' && needs.prepare.outputs.draft == 'false' }}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push
@@ -200,26 +164,24 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      - name: Write docker pull notes
+      - name: Write Docker notes
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          TAG: ${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ needs.prepare.outputs.image }}
         run: |
           set -euo pipefail
-          mkdir -p dist/release
-          image="${{ needs.prepare.outputs.image }}"
-          # normalize owner to lowercase for GHCR
-          image="$(echo "$image" | tr '[:upper:]' '[:lower:]')"
-          cat > dist/release/DOCKER.txt <<EOF
+          mkdir -p dist/docker
+          image="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          cat > dist/docker/DOCKER.txt <<EOF
           MicroDeviceStatus Docker image
 
-          Image: ${image}:${TAG}
+          Image: ${image}:v${VERSION}
           Also:  ${image}:latest (stable releases only)
 
           Quick start:
 
-            docker pull ${image}:${TAG}
+            docker pull ${image}:v${VERSION}
 
             cat > .env <<'ENV'
             MDS_ADMIN_TOKEN=replace-with-a-long-random-token
@@ -234,125 +196,75 @@ jobs:
               -e MDS_ADDR=:8080 \\
               -e MDS_DB_PATH=/data/micro-device-status.db \\
               -v mds-data:/data \\
-              ${image}:${TAG}
+              ${image}:v${VERSION}
 
             curl -sS http://127.0.0.1:8080/healthz
-
-          Or use the mds-server-docker-*.tar.gz release asset (Compose bundle).
           EOF
-          # strip leading indentation from heredoc accidental spaces
-          sed -i 's/^          //' dist/release/DOCKER.txt
+          sed -i 's/^          //' dist/docker/DOCKER.txt
 
       - name: Upload Docker notes
         uses: actions/upload-artifact@v4
         with:
           name: docker-notes
-          path: dist/release/DOCKER.txt
+          path: dist/docker/DOCKER.txt
+          if-no-files-found: error
 
   publish:
-    needs: [prepare, server-and-desktop, android, docker]
+    needs: [prepare, server-packages, docker]
     if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download server/desktop packages
+      - name: Download server packages
         uses: actions/download-artifact@v4
         with:
-          name: server-desktop-packages
-          path: artifacts/server-desktop-packages
-
-      - name: Download Android APK
-        uses: actions/download-artifact@v4
-        with:
-          name: android-apk
-          path: artifacts/android-apk
+          name: server-packages
+          path: release
 
       - name: Download Docker notes
         uses: actions/download-artifact@v4
         with:
           name: docker-notes
-          path: artifacts/docker-notes
+          path: release
 
-      - name: Assemble release directory
+      - name: Write release notes
         shell: bash
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ needs.prepare.outputs.image }}
         run: |
           set -euo pipefail
-          mkdir -p release
-          # flatten only the intentional package artifacts (not docker buildx cache dumps)
-          find artifacts -type f -print
-          find artifacts -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.apk' -o -name 'SHA256SUMS.txt' -o -name 'release-manifest.json' -o -name 'DOCKER.txt' -o -name '*.sha256' \) \
-            -exec cp -v {} release/ \;
-
-          # merge checksums
-          : > release/SHA256SUMS.txt
-          if [[ -f release/SHA256SUMS.txt ]]; then
-            # rewrite complete checksums for all assets present
-            (
-              cd release
-              : > SHA256SUMS.txt
-              for f in *.zip *.tar.gz *.apk; do
-                [[ -f "$f" ]] || continue
-                sha256sum "$f" >> SHA256SUMS.txt
-              done
-            )
-          fi
-
-          image="${{ needs.prepare.outputs.image }}"
           cat > release/RELEASE_NOTES.md <<EOF
-          ## MicroDeviceStatus ${TAG}
+          ## MicroDeviceStatus Server ${TAG}
 
-          ### Server
-          - Install archives: \`mds-server-*\` (binary + INSTALL.txt + systemd unit where applicable)
-          - Docker image: \`${image}:${TAG}\`
-          - Docker Compose bundle: \`mds-server-docker-${VERSION}.tar.gz\`
+          - Server install archives: `mds-server-*`
+          - Docker image: `${IMAGE}:v${VERSION}`
+          - Docker Compose bundle: `mds-server-docker-${VERSION}.tar.gz`
+          - Checksums: `SHA256SUMS.txt`
 
-          Docker one-liner:
+          Docker:
 
-          \`\`\`bash
-          docker pull ${image}:${TAG}
-          docker run -d --name microdevicestatus --restart unless-stopped \\
-            -p 127.0.0.1:8080:8080 \\
-            -e MDS_ADMIN_TOKEN=... -e MDS_ADMIN_USERNAME=admin -e MDS_ADMIN_PASSWORD=... \\
-            -e MDS_ADDR=:8080 -e MDS_DB_PATH=/data/micro-device-status.db \\
-            -v mds-data:/data ${image}:${TAG}
-          \`\`\`
-
-          ### Desktop clients
-          - Windows / Linux / macOS install archives: \`mds-desktop-*\`
-
-          ### Android
-          - APK: \`mds-mobile-android-${VERSION}.apk\` (debug-signed for direct installation; replace the signing config before store distribution)
-
-          ### Checksums
-          See \`SHA256SUMS.txt\`.
-
-          Full docs: [DEPLOY.md](https://github.com/${{ github.repository }}/blob/${TAG}/DEPLOY.md)
+          ```bash
+          docker pull ${IMAGE}:v${VERSION}
+          ```
           EOF
           sed -i 's/^          //' release/RELEASE_NOTES.md
-          ls -la release
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: MicroDeviceStatus ${{ needs.prepare.outputs.tag }}
+          name: MicroDeviceStatus Server ${{ needs.prepare.outputs.tag }}
           body_path: release/RELEASE_NOTES.md
-          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.version == '' }}
+          draft: ${{ needs.prepare.outputs.draft == 'true' }}
           generate_release_notes: true
           files: |
             release/*.zip
             release/*.tar.gz
-            release/*.apk
             release/SHA256SUMS.txt
             release/release-manifest.json
             release/DOCKER.txt
-            release/*.sha256
             release/RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,167 @@
+name: Release Mobile
+
+on:
+  push:
+    tags:
+      - "mobile-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Android version without prefix (e.g. 0.3.0). Empty = draft."
+        required: false
+        default: ""
+      publish:
+        description: "Create GitHub Release"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-mobile-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      should_publish: ${{ steps.meta.outputs.should_publish }}
+      draft: ${{ steps.meta.outputs.draft }}
+    steps:
+      - name: Resolve version
+        id: meta
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            raw="$DISPATCH_VERSION"
+            publish="$DISPATCH_PUBLISH"
+            draft=false
+            if [[ -z "$raw" ]]; then
+              raw="0.0.0-draft.$(date -u +%Y%m%d%H%M%S)"
+              draft=true
+            fi
+          else
+            raw="${GITHUB_REF_NAME#mobile-v}"
+            publish=true
+            draft=false
+          fi
+          echo "version=${raw}" >> "$GITHUB_OUTPUT"
+          echo "tag=mobile-v${raw}" >> "$GITHUB_OUTPUT"
+          echo "should_publish=${publish}" >> "$GITHUB_OUTPUT"
+          echo "draft=${draft}" >> "$GITHUB_OUTPUT"
+          echo "Resolved mobile version=mobile-v${raw} publish=${publish}"
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept licenses and install platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Build release APK
+        working-directory: mds_mobile
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew || true
+          version_code="$(echo "$VERSION" | awk -F'[.-]' '{
+            major=$1+0; minor=$2+0; patch=$3+0;
+            if (major==0 && minor==0 && patch==0) { print 1; exit }
+            print major*10000 + minor*100 + patch
+          }')"
+          ./gradlew --no-daemon assembleRelease \
+            -Pmds.versionName="$VERSION" \
+            -Pmds.versionCode="$version_code"
+          mkdir -p ../dist/mobile
+          cp app/build/outputs/apk/release/*.apk \
+            "../dist/mobile/mds-mobile-android-${VERSION}.apk"
+          (
+            cd ../dist/mobile
+            sha256sum "mds-mobile-android-${VERSION}.apk" > "mds-mobile-android-${VERSION}.apk.sha256"
+          )
+          cat > ../dist/mobile/release-manifest.json <<EOF
+          {
+            "name": "MicroDeviceStatus",
+            "component": "mobile",
+            "version": "${VERSION}",
+            "tag": "mobile-v${VERSION}",
+            "artifacts": ["android"]
+          }
+          EOF
+          sed -i 's/^          //' ../dist/mobile/release-manifest.json
+
+      - name: Upload Android package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-package
+          path: dist/mobile/*
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, android]
+    if: needs.prepare.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Android package
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-package
+          path: release
+
+      - name: Write release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cat > release/RELEASE_NOTES.md <<EOF
+          ## MicroDeviceStatus Mobile ${TAG}
+
+          - Android APK: `mds-mobile-android-${VERSION}.apk`
+          - Checksums: `mds-mobile-android-${VERSION}.apk.sha256`
+          EOF
+          sed -i 's/^          //' release/RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: MicroDeviceStatus Mobile ${{ needs.prepare.outputs.tag }}
+          body_path: release/RELEASE_NOTES.md
+          draft: ${{ needs.prepare.outputs.draft == 'true' }}
+          generate_release_notes: true
+          files: |
+            release/*.apk
+            release/*.sha256
+            release/release-manifest.json
+            release/RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -24,34 +24,46 @@ ghcr.io/sparrived/microdevicestatus:latest   # stable (no pre-release suffix) on
 
 ## How to cut a release
 
-### Option A — tag push (recommended)
+### Component tag push (recommended)
 
 ```bash
-# from a clean main
+# from a clean main, choose one component
 git checkout main
 git pull
-git tag -a v0.2.0 -m "MicroDeviceStatus v0.2.0"
-git push origin v0.2.0
+git tag -a server-v0.3.0 -m "MicroDeviceStatus Server v0.3.0"
+git push origin server-v0.3.0
+
+git tag -a desktop-v0.3.0 -m "MicroDeviceStatus Desktop v0.3.0"
+git push origin desktop-v0.3.0
+
+git tag -a mobile-v0.3.0 -m "MicroDeviceStatus Mobile v0.3.0"
+git push origin mobile-v0.3.0
 ```
 
-The [Release workflow](.github/workflows/release.yml) runs on `v*` tags and:
+Each tag starts only its component workflow:
 
-1. Builds/tests the server and packages multi-OS server + desktop archives
-2. Builds the Android release APK
-3. Builds multi-arch (`linux/amd64`, `linux/arm64`) Docker image and pushes to GHCR
-4. Creates a GitHub Release with all install assets
+- `server-v*`: server archives, Docker image, and Docker install bundle.
+- `desktop-v*`: Windows, Linux, and macOS desktop archives.
+- `mobile-v*`: Android release APK.
 
-### Option B — workflow dispatch
+Component versions are independent. They may use the same version number when
+released together, or different version numbers when only one component changed.
+The old combined `v*` release flow is retained only by historical releases such
+as `v0.2.2`; do not use it for new releases.
 
-Actions → **Release** → **Run workflow**
+### Workflow dispatch
 
-- Leave `version` empty for a draft timestamped build
-- Set `version` (e.g. `0.2.0`) and `publish=true` to create `v0.2.0`
+Actions → choose **Release Server**, **Release Desktop**, or **Release Mobile**
+→ **Run workflow**.
+
+- Leave `version` empty for a draft timestamped build.
+- Set `version` (e.g. `0.3.0`) and `publish=true` to create the component tag
+  and GitHub Release.
 
 ## Local packaging smoke test
 
 ```bash
-# requires bash, go, zip/tar
+# requires bash, go, zip/tar; this builds the complete local bundle
 ./scripts/package-release.sh 0.0.0-local
 ls dist/release
 ```

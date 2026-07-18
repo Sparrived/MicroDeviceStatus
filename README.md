@@ -202,13 +202,12 @@ snapshot only projects those administrative names, accuracy, and capture time.
 
 ## Releases
 
-GitHub Actions builds install packages for the server (binaries + Docker),
-desktop clients (Windows / Linux / macOS), and the Android APK when a version
-tag is pushed.
+GitHub Actions publishes the server, desktop, and Android client independently.
+See [RELEASE.md](RELEASE.md) for the component tag formats and workflow names.
 
-`ash
-git tag -a v0.1.0 -m "MicroDeviceStatus v0.1.0"
-git push origin v0.1.0
-`
+```bash
+git tag -a server-v0.3.0 -m "MicroDeviceStatus Server v0.3.0"
+git push origin server-v0.3.0
+```
 
 See [RELEASE.md](RELEASE.md) for asset names, GHCR image tags, and local packaging.
