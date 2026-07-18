@@ -9,6 +9,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
+import android.net.Uri;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -20,7 +22,9 @@ public final class MainActivity extends Activity {
     private EditText tokenInput;
     private EditText intervalInput;
     private CheckBox locationToggle;
+    private CheckBox autoResumeToggle;
     private TextView statusText;
+    private TextView usageAccessText;
     private String pendingAction;
     private final Handler statusHandler = new Handler(Looper.getMainLooper());
     private final Runnable statusRefresh = new Runnable() {
@@ -39,7 +43,9 @@ public final class MainActivity extends Activity {
         tokenInput = findViewById(R.id.token_input);
         intervalInput = findViewById(R.id.interval_input);
         locationToggle = findViewById(R.id.location_toggle);
+        autoResumeToggle = findViewById(R.id.auto_resume_toggle);
         statusText = findViewById(R.id.status_text);
+        usageAccessText = findViewById(R.id.usage_access_text);
         loadPreferences();
 
         Button startButton = findViewById(R.id.start_button);
@@ -48,6 +54,8 @@ public final class MainActivity extends Activity {
         stopButton.setOnClickListener(view -> stopMonitoring());
         Button sendNowButton = findViewById(R.id.send_now_button);
         sendNowButton.setOnClickListener(view -> sendNow());
+        Button usageAccessButton = findViewById(R.id.usage_access_button);
+        usageAccessButton.setOnClickListener(view -> openUsageAccessSettings());
 
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
@@ -72,6 +80,7 @@ public final class MainActivity extends Activity {
         tokenInput.setText(preferences.getString(HeartbeatService.KEY_TOKEN, ""));
         intervalInput.setText(String.valueOf(preferences.getInt(HeartbeatService.KEY_INTERVAL, 60)));
         locationToggle.setChecked(preferences.getBoolean(HeartbeatService.KEY_LOCATION_ENABLED, false));
+        autoResumeToggle.setChecked(preferences.getBoolean(HeartbeatService.KEY_MONITORING_ENABLED, false));
     }
 
     private void savePreferences() {
@@ -87,6 +96,7 @@ public final class MainActivity extends Activity {
                 .putString(HeartbeatService.KEY_TOKEN, tokenInput.getText().toString().trim())
                 .putInt(HeartbeatService.KEY_INTERVAL, interval)
                 .putBoolean(HeartbeatService.KEY_LOCATION_ENABLED, locationToggle.isChecked())
+                .putBoolean(HeartbeatService.KEY_MONITORING_ENABLED, autoResumeToggle.isChecked())
                 .apply();
     }
 
@@ -136,6 +146,7 @@ public final class MainActivity extends Activity {
         stopService(new Intent(this, HeartbeatService.class));
         getSharedPreferences(HeartbeatService.PREFERENCES, MODE_PRIVATE).edit()
                 .putString(HeartbeatService.KEY_STATUS, "已停止")
+                .putBoolean(HeartbeatService.KEY_MONITORING_ENABLED, false)
                 .apply();
         refreshStatus();
     }
@@ -158,11 +169,21 @@ public final class MainActivity extends Activity {
 
     private void refreshStatus() {
         SharedPreferences preferences = getSharedPreferences(HeartbeatService.PREFERENCES, MODE_PRIVATE);
+        usageAccessText.setText(hasUsageAccess() ? "使用情况访问权限：已授予" : "使用情况访问权限：未授予，前台应用将显示为空");
         String status = preferences.getString(HeartbeatService.KEY_STATUS, "尚未启动");
         String sentAt = preferences.getString(HeartbeatService.KEY_LAST_SENT, "");
         if (!sentAt.isEmpty()) {
             status += "\n最后上报：" + sentAt;
         }
         statusText.setText(status);
+    }
+
+    private void openUsageAccessSettings() {
+        startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:" + getPackageName())));
+    }
+
+    private boolean hasUsageAccess() {
+        android.app.AppOpsManager appOps = (android.app.AppOpsManager) getSystemService(APP_OPS_SERVICE);
+        return appOps != null && appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), getPackageName()) == android.app.AppOpsManager.MODE_ALLOWED;
     }
 }

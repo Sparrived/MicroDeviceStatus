@@ -1,15 +1,20 @@
 package com.microdevicestatus.mds;
 
 import android.app.ActivityManager;
+import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.app.usage.UsageEvents;
+import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.net.ConnectivityManager;
 import android.net.NetworkCapabilities;
@@ -17,6 +22,9 @@ import android.os.Build;
 import android.os.Debug;
 import android.os.Environment;
 import android.os.IBinder;
+import android.os.Process;
+import android.location.Address;
+import android.location.Geocoder;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -57,6 +65,7 @@ public final class HeartbeatService extends Service {
     public static final String KEY_TOKEN = "token";
     public static final String KEY_INTERVAL = "interval";
     public static final String KEY_LOCATION_ENABLED = "location_enabled";
+    public static final String KEY_MONITORING_ENABLED = "monitoring_enabled";
     public static final String KEY_STATUS = "status";
     public static final String KEY_LAST_SENT = "last_sent";
     public static final int LOCATION_PERMISSION_REQUEST = 21;
@@ -78,6 +87,10 @@ public final class HeartbeatService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
+        if (!ACTION_SEND_NOW.equals(action) && !getPreferences().getBoolean(KEY_MONITORING_ENABLED, false)) {
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
         if (ACTION_SEND_NOW.equals(action)) {
             startWorker();
             executor.execute(this::runCycle);
@@ -191,6 +204,9 @@ public final class HeartbeatService extends Service {
             }
         }
 
+        JSONObject foregroundApp = currentForegroundApp();
+        root.put("foreground_app", foregroundApp == null ? JSONObject.NULL : foregroundApp);
+
         JSONArray processes = new JSONArray();
         Debug.MemoryInfo appMemory = new Debug.MemoryInfo();
         Debug.getMemoryInfo(appMemory);
@@ -290,10 +306,87 @@ public final class HeartbeatService extends Service {
                 result.put("provider", location.getProvider());
             }
             result.put("captured_at", formatTime(location.getTime()));
+            String district = reverseGeocodeDistrict(location);
+            if (district != null) {
+                result.put("district", district);
+            }
         } catch (Exception error) {
             return null;
         }
         return result;
+    }
+
+    private JSONObject currentForegroundApp() {
+        if (!hasUsageAccess()) {
+            return null;
+        }
+        UsageStatsManager manager = (UsageStatsManager) getSystemService(USAGE_STATS_SERVICE);
+        if (manager == null) {
+            return null;
+        }
+        long end = System.currentTimeMillis();
+        UsageEvents events = manager.queryEvents(end - TimeUnit.MINUTES.toMillis(10), end);
+        UsageEvents.Event event = new UsageEvents.Event();
+        String packageName = null;
+        long capturedAt = 0;
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event);
+            int eventType = event.getEventType();
+            if (eventType != UsageEvents.Event.ACTIVITY_RESUMED && eventType != UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                continue;
+            }
+            if (event.getTimeStamp() >= capturedAt && !isExcludedForegroundPackage(event.getPackageName())) {
+                packageName = event.getPackageName();
+                capturedAt = event.getTimeStamp();
+            }
+        }
+        if (packageName == null) {
+            return null;
+        }
+        try {
+            ApplicationInfo info = getPackageManager().getApplicationInfo(packageName, 0);
+            JSONObject result = new JSONObject();
+            result.put("name", getPackageManager().getApplicationLabel(info).toString());
+            result.put("package_name", packageName);
+            result.put("captured_at", formatTime(capturedAt));
+            return result;
+        } catch (PackageManager.NameNotFoundException | org.json.JSONException ignored) {
+            return null;
+        }
+    }
+
+    private boolean hasUsageAccess() {
+        AppOpsManager appOps = (AppOpsManager) getSystemService(APP_OPS_SERVICE);
+        return appOps != null && appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), getPackageName()) == AppOpsManager.MODE_ALLOWED;
+    }
+
+    private boolean isExcludedForegroundPackage(String packageName) {
+        if (packageName == null || packageName.equals(getPackageName())) {
+            return true;
+        }
+        Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+        android.content.pm.ResolveInfo launcher = getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+        return launcher != null && launcher.activityInfo != null && packageName.equals(launcher.activityInfo.packageName);
+    }
+
+    @SuppressWarnings("deprecation")
+    private String reverseGeocodeDistrict(Location location) {
+        if (!Geocoder.isPresent()) {
+            return null;
+        }
+        try {
+            List<Address> addresses = new Geocoder(this, Locale.getDefault()).getFromLocation(location.getLatitude(), location.getLongitude(), 1);
+            if (addresses == null || addresses.isEmpty()) {
+                return null;
+            }
+            String district = addresses.get(0).getSubLocality();
+            if (district == null || district.trim().isEmpty()) {
+                district = addresses.get(0).getSubAdminArea();
+            }
+            return district == null || district.trim().isEmpty() ? null : district.trim();
+        } catch (IOException | IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private void sendWithQueue(String payload) throws Exception {

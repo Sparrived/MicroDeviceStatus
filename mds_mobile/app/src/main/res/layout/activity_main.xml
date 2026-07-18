@@ -106,6 +106,33 @@
             android:textColor="@color/mds_muted"
             android:textSize="12sp" />
 
+        <CheckBox
+            android:id="@+id/auto_resume_toggle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="开机自动恢复上报"
+            android:textColor="@color/mds_ink"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/usage_access_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="4dp"
+            android:text="使用情况访问权限：未授予，前台应用将显示为空"
+            android:textColor="@color/mds_muted"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/usage_access_button"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:text="设置前台应用访问权限"
+            android:textAllCaps="false" />
+
         <TextView
             android:id="@+id/status_text"
             android:layout_width="match_parent"
@@ -152,7 +179,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
-            android:text="客户端会采集内存、存储、电量、网络和当前应用进程信息。网络短暂中断时，心跳会保存在本机并在恢复后依次补发。生产环境请使用 HTTPS。"
+            android:text="客户端会采集内存、存储、电量、网络和当前应用信息。网络中断时，心跳会保存在本机并在恢复后补发。请允许通知、后台运行和不受限制的电池使用；部分手机还需要手动开启自启动。生产环境请使用 HTTPS。"
             android:textColor="@color/mds_muted"
             android:textSize="13sp" />
     </LinearLayout>
