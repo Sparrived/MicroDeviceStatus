@@ -37,7 +37,7 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 		t.Fatal("create response did not include device id and token")
 	}
 
-	heartbeatBody := bytes.NewBufferString(`{"reported_at":"2026-07-18T00:00:00Z","metrics":{"cpu_percent":12.5},"location":{"latitude":31.2304,"longitude":121.4737,"accuracy_meters":20},"processes":[]}`)
+	heartbeatBody := bytes.NewBufferString(`{"reported_at":"2026-07-18T00:00:00Z","metrics":{"cpu_percent":12.5},"location":{"country":"中国","province":"上海市","city":"上海市","district":"浦东新区"},"processes":[]}`)
 	heartbeatReq := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", heartbeatBody)
 	heartbeatReq.Header.Set("Authorization", "Bearer "+created.Token)
 	heartbeatResp := httptest.NewRecorder()
@@ -57,8 +57,13 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 	if !bytes.Contains(latestResp.Body.Bytes(), []byte(`"cpu_percent":12.5`)) {
 		t.Fatalf("latest response did not contain heartbeat payload: %s", latestResp.Body.String())
 	}
-	if !bytes.Contains(latestResp.Body.Bytes(), []byte(`"latitude":31.2304`)) {
+	if !bytes.Contains(latestResp.Body.Bytes(), []byte(`"district":"浦东新区"`)) {
 		t.Fatalf("latest response did not contain location payload: %s", latestResp.Body.String())
+	}
+	for _, forbidden := range []string{"latitude", "longitude"} {
+		if bytes.Contains(latestResp.Body.Bytes(), []byte(forbidden)) {
+			t.Fatalf("latest response contains forbidden location field %q: %s", forbidden, latestResp.Body.String())
+		}
 	}
 }
 
@@ -162,7 +167,7 @@ func TestPublicSnapshotAuthAndProjection(t *testing.T) {
 	if public.Location.Country == nil || *public.Location.Country != "中国" || public.Location.Province == nil || *public.Location.Province != "江苏省" || public.Location.City == nil || *public.Location.City != "无锡市" {
 		t.Fatalf("location hierarchy was not projected: %+v", public.Location)
 	}
-	for _, forbidden := range []string{"latitude", "longitude", "processes", "secret.exe", "私人文档", "secret-host", "public-device"} {
+	for _, forbidden := range []string{"latitude", "longitude", "accuracy_meters", "altitude_meters", "provider", "processes", "secret.exe", "私人文档", "secret-host", "public-device"} {
 		if bytes.Contains(resp.Body.Bytes(), []byte(forbidden)) {
 			t.Fatalf("public response contains forbidden field/value %q: %s", forbidden, resp.Body.String())
 		}

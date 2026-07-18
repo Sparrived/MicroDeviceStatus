@@ -1,14 +1,25 @@
 MicroDeviceStatus Desktop Client
 
-1. Copy config.example.json to mds-desktop.json.
-2. Set "endpoint" to your server URL and "token" to the device token
-   from POST /api/v1/devices (shown once at provisioning).
+Interactive Windows install:
+
+1. Put `install-mds-desktop-windows.cmd`, the Windows exe, and
+   `config.example.json` in the same directory.
+2. Double-click `install-mds-desktop-windows.cmd`.
+3. Enter the server URL and the device token from `POST /api/v1/devices`.
+   The wizard creates `mds-desktop.json`, registers login startup, and can
+   test and start the agent immediately.
+
+Manual or automated install:
+
+1. Copy `config.example.json` to `mds-desktop.json`.
+2. Set `endpoint` to your server URL and `token` to the device token
+   from `POST /api/v1/devices` (shown once at provisioning).
 3. Run the binary next to the config file, or pass flags:
    -endpoint https://status.example.com -token <device-token>
 4. Optional env: MDS_ENDPOINT, MDS_DEVICE_TOKEN
 5. Failed heartbeats are queued in mds-desktop.queue.jsonl and retried.
 
-Enable startup after placing the binary and config in their permanent paths:
+Register startup manually after placing the binary and config in their permanent paths:
 
 Windows (current user, at logon):
 

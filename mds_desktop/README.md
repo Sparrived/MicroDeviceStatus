@@ -6,6 +6,10 @@ device token.
 
 ## Configure
 
+On Windows release packages, double-click `install-mds-desktop-windows.cmd`
+to open the interactive setup wizard. It creates the config file, registers
+current-user login startup, and can test/start the agent immediately.
+
 Copy `config.example.json` to `mds-desktop.json`, replace the endpoint and
 token, then run:
 

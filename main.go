@@ -89,12 +89,10 @@ type publicForegroundApp struct {
 }
 
 type publicLocation struct {
-	Country        *string  `json:"country"`
-	Province       *string  `json:"province"`
-	City           *string  `json:"city"`
-	District       *string  `json:"district"`
-	CapturedAt     *string  `json:"captured_at"`
-	AccuracyMeters *float64 `json:"accuracy_meters"`
+	Country  *string `json:"country"`
+	Province *string `json:"province"`
+	City     *string `json:"city"`
+	District *string `json:"district"`
 }
 
 type publicDevice struct {
@@ -602,21 +600,17 @@ func projectPublicPayload(payload []byte) (publicProjection, error) {
 	}
 	if value, ok := raw["location"]; ok && string(value) != "null" {
 		var location struct {
-			Country        string   `json:"country"`
-			Province       string   `json:"province"`
-			City           string   `json:"city"`
-			District       string   `json:"district"`
-			CapturedAt     string   `json:"captured_at"`
-			AccuracyMeters *float64 `json:"accuracy_meters"`
+			Country  string `json:"country"`
+			Province string `json:"province"`
+			City     string `json:"city"`
+			District string `json:"district"`
 		}
 		if json.Unmarshal(value, &location) == nil {
 			result.Location = &publicLocation{
-				Country:        nonEmptyString(location.Country),
-				Province:       nonEmptyString(location.Province),
-				City:           nonEmptyString(location.City),
-				District:       nonEmptyString(location.District),
-				CapturedAt:     nonEmptyString(location.CapturedAt),
-				AccuracyMeters: location.AccuracyMeters,
+				Country:  nonEmptyString(location.Country),
+				Province: nonEmptyString(location.Province),
+				City:     nonEmptyString(location.City),
+				District: nonEmptyString(location.District),
 			}
 		}
 	}

@@ -103,7 +103,7 @@ package_desktop() {
   mkdir -p "${dir}"
   cp "${STAGE}/${binary}" "${dir}/${binary}"
   cp mds_desktop/config.example.json "${dir}/config.example.json"
-  cp packaging/mds-desktop.service packaging/install-mds-desktop-windows.ps1 "${dir}/"
+  cp packaging/mds-desktop.service packaging/install-mds-desktop-windows.ps1 packaging/install-mds-desktop-windows.cmd "${dir}/"
   cp packaging/DESKTOP_INSTALL.txt "${dir}/INSTALL.txt"
   archive_dir "${name}" "${fmt}"
 }
