@@ -214,9 +214,7 @@ Authorization: Bearer <MDS_PUBLIC_STATUS_TOKEN>
         "country": "中国",
         "province": "江苏省",
         "city": "无锡市",
-        "district": "滨湖区",
-        "captured_at": "2026-07-18T08:58:50Z",
-        "accuracy_meters": 80
+        "district": "滨湖区"
       }
     }
   ]
@@ -337,7 +335,7 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $principal = New-ScheduledTaskPrincipal `
   -UserId $env:USERNAME `
   -LogonType Interactive `
-  -RunLevel LeastPrivilege
+  -RunLevel Limited
 
 Register-ScheduledTask `
   -TaskName "MicroDeviceStatus Desktop Agent" `
@@ -429,30 +427,7 @@ Android 12 及以上、以及部分国产系统可能限制后台启动和自启
 
 ### 6.3 手机位置与区级展示
 
-当前客户端已经可以上报：
-
-```json
-{
-  "location": {
-    "latitude": 31.4900,
-    "longitude": 120.3100,
-    "accuracy_meters": 80,
-    "provider": "network",
-    "captured_at": "2026-07-18T08:58:50Z"
-  }
-}
-```
-
-但博客需求是“精确到区”，因此不能直接把上述原始字段放进公开快照。推荐分两层保存：
-
-- 管理接口和原始报告：可以保存原始坐标，供本人查看。
-- 公开快照：只返回国家、省、市、区和采集时间，不返回经纬度。
-
-区名获取有两种方案：
-
-### 方案 A：Android 端反向地理编码
-
-Android 客户端根据坐标生成国家、省、市、区字段后再上报：
+移动端定位后先在设备上进行反向地理编码，只向 MDS 上报国家、省、市、区：
 
 ```json
 {
@@ -460,27 +435,14 @@ Android 客户端根据坐标生成国家、省、市、区字段后再上报：
     "country": "中国",
     "province": "江苏省",
     "city": "无锡市",
-    "district": "滨湖区",
-    "accuracy_meters": 80,
-    "captured_at": "2026-07-18T08:58:50Z"
+    "district": "滨湖区"
   }
 }
 ```
 
-优点是 MDS 服务端不需要保存地图 API 密钥。缺点是 Android 系统的 `Geocoder` 受系统服务和网络影响，部分设备可能返回空值或不同语言的行政区名称。
+移动端不会传输 latitude、longitude、altitude、accuracy、provider 或原始定位时间。Android 系统的 `Geocoder` 受系统服务和网络影响，部分设备可能返回空值或不同语言的行政区名称；反向地理编码失败时不发送 `location` 字段。
 
-### 方案 B：MDS 服务端反向地理编码
-
-MDS 服务端收到新位置后调用指定的地理编码服务，并缓存结果。可以为此增加：
-
-```env
-MDS_GEOCODER_URL=https://example-geocoder.invalid/reverse
-MDS_GEOCODER_TOKEN=replace-with-geocoder-token
-```
-
-服务端应将坐标先按网格取整后再查询和缓存，避免每次心跳调用一次外部服务。原始坐标不应出现在公开接口中。
-
-对于个人博客第一版，推荐先采用方案 A 或手动维护区名，先完成状态链路，再决定是否引入外部地图服务。
+MDS 服务端和公开快照只处理这四个行政区字段，不保存或补回原始坐标。
 
 ### 6.4 电量不需要额外采集改造
 
@@ -635,7 +597,7 @@ Invoke-RestMethod `
 
 - 首次启动可以保存 MDS 地址和设备令牌。
 - 未授予定位权限时，心跳仍能正常发送。
-- 授予定位权限后，原始报告包含位置。
+- 授予定位权限后，心跳包含国家、省、市、区名称。
 - 未授予使用情况访问权限时，前台应用为空且不误报 MDS。
 - 授予使用情况访问权限后，能识别最近使用的应用。
 - 开启自动恢复后，手机重启能恢复前台服务。

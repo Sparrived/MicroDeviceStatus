@@ -65,7 +65,7 @@ export async function GET() {
   try {
     const response = await fetch(`${apiURL}/api/v1/public/snapshot`, {
       headers: { Authorization: `Bearer ${token}` },
-      next: { revalidate: 60 },
+      next: { revalidate: 5 },
     });
 
     if (!response.ok) {
@@ -78,7 +78,7 @@ export async function GET() {
     const snapshot = await response.json();
     return NextResponse.json(snapshot, {
       headers: {
-        "Cache-Control": "s-maxage=60, stale-while-revalidate=300",
+        "Cache-Control": "s-maxage=5, stale-while-revalidate=10",
       },
     });
   } catch {
@@ -195,13 +195,11 @@ const data = await response.json();
   "country": "中国",
   "province": "江苏省",
   "city": "无锡市",
-  "district": "滨湖区",
-  "captured_at": "2026-07-18T08:58:50Z",
-  "accuracy_meters": 80
+  "district": "滨湖区"
 }
 ```
 
-公开接口不会返回 `latitude` 和 `longitude`。博客可显示国家/省/市/区名、采集时间和可选精度，不要尝试从其他接口补回精确坐标。
+公开接口的位置对象只包含国家/省/市/区名。不要尝试从其他接口补回精确坐标。
 
 ## 7. 异常与缓存
 
@@ -210,7 +208,7 @@ const data = await response.json();
 1. MDS 正常返回设备状态：按设备的 `status` 显示。
 2. 博客代理返回 `503`：显示“设备状态暂时不可用”，不要把所有设备改成“离线”。
 
-服务端 `fetch` 使用 `revalidate: 60`，博客最多每 60 秒向 MDS 请求一次新快照。响应头中的 `stale-while-revalidate=300` 允许部署平台在短时间内继续提供旧快照。生产部署仍应观察平台是否支持 Next.js Data Cache；不支持时，应使用平台缓存或 Redis 保存最近一次成功快照。
+博客页面每 5 秒请求一次自己的 `/api/device-status`，服务端代理到 MDS 的 `fetch` 使用 `revalidate: 5`。响应头中的 `s-maxage=5, stale-while-revalidate=10` 允许部署平台在短时间内复用最近快照。页面进入后台标签页时暂停轮询，回到前台后继续。生产部署仍应观察平台是否支持 Next.js Data Cache；不支持时，应使用平台缓存或 Redis 保存最近一次成功快照。
 
 建议页面提供一个“数据生成于”时间，使用 `generated_at`，不要使用浏览器当前时间伪造数据新鲜度。
 

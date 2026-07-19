@@ -169,6 +169,7 @@ func main() {
 
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /assets/microdevicestatus-logo.png", s.brandLogo)
 	mux.HandleFunc("GET /", s.dashboard)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /api/v1/public/snapshot", s.publicSnapshot)
