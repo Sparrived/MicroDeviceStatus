@@ -124,6 +124,7 @@ const data = await response.json();
         "memory_percent": 43.2,
         "disk_used_percent": 68.1,
         "battery_percent": null,
+        "activity_state": "busy",
         "network_connected": null
       },
       "foreground_app": {
@@ -173,6 +174,7 @@ const data = await response.json();
 - `disk_used_percent`：磁盘使用率。
 - `battery_percent`：手机电量；电脑通常为 `null`。
 - `network_connected`：手机网络连接状态。
+- `activity_state`：Windows 用户活动状态，`busy` 表示忙碌，`idle` 表示空闲；没有该读数时为 `null`。
 
 数字字段直接按百分比显示即可，不要把 `null` 当成 `0`。
 

@@ -79,6 +79,7 @@ type publicMetrics struct {
 	DiskUsedPercent  *float64 `json:"disk_used_percent"`
 	BatteryPercent   *float64 `json:"battery_percent"`
 	NetworkConnected *bool    `json:"network_connected"`
+	ActivityState    *string  `json:"activity_state"`
 }
 
 type publicForegroundApp struct {
@@ -572,6 +573,7 @@ func projectPublicPayload(payload []byte) (publicProjection, error) {
 			DiskUsedPercent  *float64 `json:"disk_used_percent"`
 			BatteryPercent   *float64 `json:"battery_percent"`
 			NetworkConnected *bool    `json:"network_connected"`
+			ActivityState    string   `json:"activity_state"`
 		}
 		if json.Unmarshal(value, &metrics) == nil {
 			result.Metrics = publicMetrics{
@@ -580,6 +582,7 @@ func projectPublicPayload(payload []byte) (publicProjection, error) {
 				DiskUsedPercent:  metrics.DiskUsedPercent,
 				BatteryPercent:   metrics.BatteryPercent,
 				NetworkConnected: metrics.NetworkConnected,
+				ActivityState:    publicActivityState(metrics.ActivityState),
 			}
 		}
 	}
@@ -621,6 +624,13 @@ func projectPublicPayload(payload []byte) (publicProjection, error) {
 func nonEmptyString(value string) *string {
 	value = strings.TrimSpace(value)
 	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func publicActivityState(value string) *string {
+	if value != "idle" && value != "busy" {
 		return nil
 	}
 	return &value
