@@ -53,8 +53,11 @@ interactive user session instead of running it as SYSTEM/root so foreground
 application collection remains available.
 
 Windows heartbeats include the foreground display name, executable process
-name, and capture time. The raw window title remains private to the management
-API and is excluded from the public blog snapshot.
+name, and capture time. They also include `metrics.activity_state` as `busy` or
+`idle`; five minutes without keyboard or mouse input is considered idle, and
+`metrics.idle_seconds` reports the measured idle duration. The raw window title
+remains private to the management API and is excluded from the public blog
+snapshot.
 
 ## Build
 

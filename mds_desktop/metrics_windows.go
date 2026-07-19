@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func collectPlatformMetrics() (metricsSnapshot, error) {
@@ -35,6 +36,12 @@ public static class MdsForegroundWindow {
     public ulong AvailableExtendedVirtual;
   }
   [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx status);
+  [StructLayout(LayoutKind.Sequential)] struct LastInputInfo {
+    public uint Size;
+    public uint Time;
+  }
+  [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
+  [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
@@ -42,6 +49,13 @@ public static class MdsForegroundWindow {
     var status = new MemoryStatusEx { Length = (uint)Marshal.SizeOf(typeof(MemoryStatusEx)) };
     if (!GlobalMemoryStatusEx(ref status)) return null;
     return new { total = status.TotalPhys, free = status.AvailablePhys };
+  }
+  public static object ReadActivity() {
+    var info = new LastInputInfo { Size = (uint)Marshal.SizeOf(typeof(LastInputInfo)) };
+    if (!GetLastInputInfo(ref info)) return null;
+    var now = unchecked((uint)GetTickCount64());
+    var idleMilliseconds = unchecked(now - info.Time);
+    return new { idle_seconds = idleMilliseconds / 1000.0 };
   }
   public static object Read() {
     var handle = GetForegroundWindow();
@@ -55,6 +69,7 @@ public static class MdsForegroundWindow {
 }
 '@
 $memory = [MdsForegroundWindow]::ReadMemory()
+$activity = [MdsForegroundWindow]::ReadActivity()
 $foregroundWindow = [MdsForegroundWindow]::Read()
 $foreground = $null
 if ($foregroundWindow -ne $null) {
@@ -78,6 +93,7 @@ if ($foregroundWindow -ne $null) {
   memory_free_bytes = [uint64]$memory.free
   disk_total_bytes = [uint64]$disk.TotalSize
   disk_free_bytes = [uint64]$disk.AvailableFreeSpace
+  idle_seconds = if ($activity -ne $null) { [double]$activity.idle_seconds } else { $null }
   foreground_app = $foreground
   processes = $processes
 } | ConvertTo-Json -Compress -Depth 4`
@@ -99,6 +115,7 @@ if ($foregroundWindow -ne $null) {
 		MemoryFreeBytes  uint64          `json:"memory_free_bytes"`
 		DiskTotalBytes   uint64          `json:"disk_total_bytes"`
 		DiskFreeBytes    uint64          `json:"disk_free_bytes"`
+		IdleSeconds      *float64        `json:"idle_seconds"`
 		ForegroundApp    json.RawMessage `json:"foreground_app"`
 		Processes        json.RawMessage `json:"processes"`
 	}
@@ -114,6 +131,10 @@ if ($foregroundWindow -ne $null) {
 		ForegroundApp:    decodeWindowsForeground(raw.ForegroundApp),
 		Processes:        decodeWindowsProcesses(raw.Processes),
 	}
+	if raw.IdleSeconds != nil {
+		result.IdleSeconds = *raw.IdleSeconds
+		result.ActivityState = windowsActivityState(result.IdleSeconds)
+	}
 	if result.MemoryTotalBytes > 0 {
 		result.MemoryPercent = float64(result.MemoryUsedBytes) / float64(result.MemoryTotalBytes) * 100
 	}
@@ -121,6 +142,15 @@ if ($foregroundWindow -ne $null) {
 		result.DiskUsedPercent = float64(result.DiskTotalBytes-result.DiskFreeBytes) / float64(result.DiskTotalBytes) * 100
 	}
 	return result, nil
+}
+
+const windowsIdleAfter = 5 * time.Minute
+
+func windowsActivityState(idleSeconds float64) string {
+	if idleSeconds >= windowsIdleAfter.Seconds() {
+		return "idle"
+	}
+	return "busy"
 }
 
 func decodeWindowsForeground(data json.RawMessage) *appSnapshot {
